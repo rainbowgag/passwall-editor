@@ -36,7 +36,7 @@ opkg install luci-app-passwall-device_0.2.1_all.ipk
 GitHub 一键安装或升级：
 
 ```sh
-wget -O /tmp/passwall-device.ipk https://github.com/rainbowgag/passwall-editor/raw/refs/heads/main/passwall-device-control/dist/luci-app-passwall-device_0.2.1_all.ipk && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device restart
+curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.2.1_all.ipk && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device restart
 ```
 
 VPS 一键安装或升级：
