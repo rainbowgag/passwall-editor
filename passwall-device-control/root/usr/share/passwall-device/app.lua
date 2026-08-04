@@ -31,6 +31,19 @@ local function valid_id(s)
 	return tostring(s or ""):match("^[%w_%-]+$") ~= nil
 end
 
+local function parse_ids(value)
+	local text_value = tostring(value or "")
+	if text_value:find("[^%w_,%-%s]") then return nil end
+	local ids, seen = {}, {}
+	for id in text_value:gmatch("[^,%s]+") do
+		if valid_id(id) and not seen[id] then
+			seen[id] = true
+			ids[#ids + 1] = id
+		end
+	end
+	return ids
+end
+
 local function percent_encode(s)
 	return (tostring(s or ""):gsub("([^%w%-_%.~])", function(c)
 		return string.format("%%%02X", string.byte(c))
@@ -86,10 +99,10 @@ local function binding_for_mac(c, mac)
 	return found
 end
 
-local function binding_for_node(c, node_id)
-	local found
+local function bindings_for_node(c, node_id)
+	local found = {}
 	c:foreach(CFG, "binding", function(s)
-		if s.node_id == node_id then found = s end
+		if s.node_id == node_id then found[#found + 1] = s end
 	end)
 	return found
 end
@@ -128,29 +141,39 @@ local function list_status()
 	local c = uci.cursor()
 	local nodes = {}
 	local bindings = {}
+	local binding_groups = {}
 	local pw_nodes = node_map(c)
 	local wireless, wireless_scanned = wifi_clients()
+	c:foreach(CFG, "binding", function(s)
+		local p = pw_nodes[s.node_id]
+		local online = wireless[(s.mac or ""):lower()] == true
+		local display_name = trim(s.remark) ~= "" and s.remark or (s.hostname or "未知设备")
+		local item = {
+			id=s[".name"], mac=s.mac or "", ip=s.ip or "", hostname=display_name,
+			system_hostname=s.hostname or "", remark=s.remark or "",
+			node_id=s.node_id or "", node=p and (p.remarks or s.node_id) or "节点已删除",
+			state=s.state or "active", bound_at=s.bound_at or "", online=online
+		}
+		bindings[#bindings + 1] = item
+		binding_groups[s.node_id or ""] = binding_groups[s.node_id or ""] or {}
+		binding_groups[s.node_id or ""][#binding_groups[s.node_id or ""] + 1] = item
+	end)
 	c:foreach(CFG, "node", function(s)
 		local p = pw_nodes[s.passwall_id]
 		if p then
-			local b = binding_for_node(c, s.passwall_id)
+			local group = binding_groups[s.passwall_id] or {}
+			local online_count, names = 0, {}
+			for _, b in ipairs(group) do
+				if b.online then online_count = online_count + 1 end
+				names[#names + 1] = b.hostname
+			end
 			nodes[#nodes + 1] = {
 				id=s.passwall_id, meta_id=s[".name"], remarks=p.remarks or s.remarks or s.passwall_id,
 				protocol=p.protocol or "", type=p.type or "", address=p.address or "", port=p.port or "",
-				code=s.code or "", bound=b ~= nil, device=b and (b.hostname or b.mac) or "",
-				online=b and wireless[(b.mac or ""):lower()] == true or false,
-				state=b and (b.state or "active") or "free"
+				code=s.code or "", bound=#group > 0, device_count=#group, online_count=online_count,
+				devices=names, online=online_count > 0, state=#group > 0 and "active" or "free"
 			}
 		end
-	end)
-	c:foreach(CFG, "binding", function(s)
-		local p = pw_nodes[s.node_id]
-		bindings[#bindings + 1] = {
-			id=s[".name"], mac=s.mac or "", ip=s.ip or "", hostname=s.hostname or "未知设备",
-			node_id=s.node_id or "", node=p and (p.remarks or s.node_id) or "节点已删除",
-			state=s.state or "active", bound_at=s.bound_at or "",
-			online=wireless[(s.mac or ""):lower()] == true
-		}
 	end)
 	table.sort(nodes, function(a,b) return a.remarks < b.remarks end)
 	table.sort(bindings, function(a,b) return a.bound_at > b.bound_at end)
@@ -160,7 +183,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.2.1"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.3.0"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -482,9 +505,7 @@ local function bind(ip, code)
 	mac = mac:lower()
 	local hostname = hostname_for(c, mac, ip)
 	local old_mac = binding_for_mac(c, mac)
-	local old_node = binding_for_node(c, meta.passwall_id)
 	if old_mac then remove_binding(c, old_mac) end
-	if old_node and (not old_mac or old_node[".name"] ~= old_mac[".name"]) then remove_binding(c, old_node) end
 	local bid = new_section(c, CFG, "binding", "pwc_bind_", {
 		mac=mac, ip=ip, hostname=hostname, node_id=meta.passwall_id, acl_id="",
 		state="pending", wireless="1", bound_at=os.date("%Y-%m-%d %H:%M:%S")
@@ -531,7 +552,8 @@ local function bind(ip, code)
 	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
 	local _,_,rate_path=rate_state(ip,false); os.remove(rate_path)
 	sys.call("logger -t passwall-device "..shellquote("绑定成功 mac="..mac.." node="..(nodes[meta.passwall_id].remarks or meta.passwall_id)))
-	return {ok=true, message="绑定成功", node=nodes[meta.passwall_id].remarks or meta.passwall_id, kicked=old_node and old_node.mac or nil}
+	local shared = #bindings_for_node(active, meta.passwall_id)
+	return {ok=true, message="绑定成功", node=nodes[meta.passwall_id].remarks or meta.passwall_id, shared_devices=shared}
 end
 
 local function toggle(enabled)
@@ -572,24 +594,53 @@ local function update_node(node_id, remarks, code)
 	return {ok=true, node_id=node_id, remarks=remarks, code=code}
 end
 
-local function delete_node(node_id, replacement)
-	if not valid_id(node_id) then return {ok=false, error="节点标识无效"} end
+local function update_binding(binding_id, remark)
+	if not valid_id(binding_id) then return {ok=false, error="绑定标识无效"} end
+	remark = trim(remark)
+	if #remark > 128 then return {ok=false, error="设备备注不能超过 128 个字符"} end
 	local c = uci.cursor()
-	local node = c:get_all(PW, node_id)
-	if not node or node[".type"] ~= "nodes" then return {ok=false, error="节点不存在"} end
+	local binding = c:get_all(CFG, binding_id)
+	if not binding or binding[".type"] ~= "binding" then return {ok=false, error="绑定不存在"} end
+	if remark == "" then c:delete(CFG, binding_id, "remark") else c:set(CFG, binding_id, "remark", remark) end
+	c:commit(CFG)
+	sys.call("logger -t passwall-device " .. shellquote("设备备注已修改 mac=" .. (binding.mac or "unknown")))
+	return {ok=true, binding_id=binding_id, remark=remark, hostname=remark ~= "" and remark or (binding.hostname or "未知设备")}
+end
+
+local function reload_after_change(log_path)
+	sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
+	sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
+	local rc = sys.call("/etc/init.d/passwall restart >" .. shellquote(log_path or "/tmp/pwc-passwall-apply.log") .. " 2>&1")
+	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
+	return rc
+end
+
+local function delete_nodes(id_text, replacement)
+	local ids = parse_ids(id_text)
+	if not ids or #ids == 0 then return {ok=false, error="请选择有效的节点"} end
+	local selected = {}
+	for _, id in ipairs(ids) do selected[id] = true end
+	local c = uci.cursor()
+	local nodes, names = {}, {}
+	for _, node_id in ipairs(ids) do
+		local node = c:get_all(PW, node_id)
+		local meta = metadata_for_node(c, node_id)
+		if not node or node[".type"] ~= "nodes" or not meta then
+			return {ok=false, error="托管节点不存在：" .. node_id}
+		end
+		nodes[#nodes + 1] = {node=node, meta=meta}
+		names[#names + 1] = node.remarks or node_id
+	end
 	replacement = trim(replacement)
 	local target
 	if replacement ~= "" then
 		target = find_node_by_remark(c, replacement)
 		if not target then return {ok=false, error="没有找到替换节点：" .. replacement} end
-		if target[".name"] == node_id then return {ok=false, error="替换节点不能与待删除节点相同"} end
+		if selected[target[".name"]] then return {ok=false, error="替换节点不能同时被选中删除"} end
+		if not metadata_for_node(c, target[".name"]) then return {ok=false, error="替换节点不属于本插件管理"} end
 	end
 	local affected = {}
-	c:foreach(CFG, "binding", function(s) if s.node_id == node_id then affected[#affected+1] = s end end)
-	if target then
-		local occupied=binding_for_node(c,target[".name"])
-		if occupied and occupied.node_id~=node_id then remove_binding(c,occupied) end
-	end
+	c:foreach(CFG, "binding", function(s) if selected[s.node_id or ""] then affected[#affected+1] = s end end)
 	for _, b in ipairs(affected) do
 		if target then
 			c:set(CFG, b[".name"], "node_id", target[".name"])
@@ -600,30 +651,33 @@ local function delete_node(node_id, replacement)
 			end
 		else remove_binding(c, b) end
 	end
-	local meta = metadata_for_node(c, node_id)
-	if meta then c:delete(CFG, meta[".name"]) end
-	c:delete(PW, node_id)
-	c:commit(PW); c:commit(CFG); c:commit("dhcp")
-	sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
-	sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
-	local rc = sys.call("/etc/init.d/passwall restart >/tmp/pwc-passwall-apply.log 2>&1")
-	if target and rc == 0 then
-		local c2=uci.cursor(); c2:foreach(CFG,"binding",function(s) if s.node_id==target[".name"] then c2:set(CFG,s[".name"],"state","active") end end); c2:commit(CFG)
+	for _, item in ipairs(nodes) do
+		c:delete(CFG, item.meta[".name"])
+		c:delete(PW, item.node[".name"])
 	end
-	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
-	return {ok=rc == 0, deleted=node.remarks or node_id, moved=#affected, replacement=target and target.remarks or nil, error=rc ~= 0 and "节点已删除，但 PassWall 重载失败；相关设备保持断网" or nil}
+	c:commit(PW); c:commit(CFG); c:commit("dhcp")
+	local rc = reload_after_change("/tmp/pwc-passwall-apply.log")
+	if target and rc == 0 then
+		local c2=uci.cursor()
+		for _, b in ipairs(affected) do c2:set(CFG, b[".name"], "state", "active") end
+		c2:commit(CFG)
+	end
+	return {ok=rc == 0, deleted=#nodes, deleted_names=names, affected=#affected, moved=target and #affected or 0, replacement=target and target.remarks or nil, error=rc ~= 0 and "节点已删除，但 PassWall 重载失败；相关设备保持断网" or nil}
 end
 
-local function unbind(binding_id)
-	if not valid_id(binding_id) then return {ok=false,error="绑定标识无效"} end
-	local c=uci.cursor(); local b=c:get_all(CFG,binding_id)
-	if not b or b[".type"]~="binding" then return {ok=false,error="绑定不存在"} end
-	remove_binding(c,b); c:commit(PW); c:commit(CFG); c:commit("dhcp")
-	sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
-	sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
-	sys.call("/etc/init.d/passwall restart >/dev/null 2>&1")
-	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
-	return {ok=true}
+local function unbind_many(id_text)
+	local ids = parse_ids(id_text)
+	if not ids or #ids == 0 then return {ok=false,error="请选择有效的设备"} end
+	local c, bindings = uci.cursor(), {}
+	for _, id in ipairs(ids) do
+		local binding = c:get_all(CFG, id)
+		if not binding or binding[".type"] ~= "binding" then return {ok=false,error="绑定不存在：" .. id} end
+		bindings[#bindings + 1] = binding
+	end
+	for _, binding in ipairs(bindings) do remove_binding(c, binding) end
+	c:commit(PW); c:commit(CFG); c:commit("dhcp")
+	local rc = reload_after_change("/tmp/pwc-unbind.log")
+	return {ok=rc == 0, removed=#bindings, error=rc ~= 0 and "设备已解绑，但 PassWall 重载失败" or nil}
 end
 
 local function test_node(node_id)
@@ -656,16 +710,97 @@ local function test_node(node_id)
 	return {ok=false,reachable=false,error="代理测试失败，节点将保持断网",details=details}
 end
 
+local UPDATE_MANIFESTS = {
+	"https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/update.json",
+	"http://m.yaml.uk:25532/update.json"
+}
+
+local function version_parts(version)
+	local parts = {}
+	for number in tostring(version or ""):gmatch("%d+") do parts[#parts + 1] = tonumber(number) or 0 end
+	return parts
+end
+
+local function version_newer(remote, current)
+	local a, b = version_parts(remote), version_parts(current)
+	for i = 1, math.max(#a, #b) do
+		local av, bv = a[i] or 0, b[i] or 0
+		if av ~= bv then return av > bv end
+	end
+	return false
+end
+
+local function fetch_update_manifest()
+	local path = "/tmp/passwall-device-update-" .. tostring(nixio.getpid()) .. ".json"
+	for _, url in ipairs(UPDATE_MANIFESTS) do
+		os.remove(path)
+		local rc = sys.call("curl -4 -fsSL --connect-timeout 5 --max-time 12 " .. shellquote(url) .. " -o " .. shellquote(path) .. " 2>/dev/null")
+		if rc == 0 then
+			local manifest = jsonc.parse(read_file(path) or "")
+			os.remove(path)
+			if type(manifest) == "table" and tostring(manifest.version or ""):match("^%d+[%d%.%-]*$") and
+			   tostring(manifest.ipk_url or ""):match("^https?://[%w%._~:/%?#%[%]@!$&'()*+,;=%%%-]+$") and
+			   tostring(manifest.sha256 or ""):match("^[a-fA-F0-9]+$") and #tostring(manifest.sha256) == 64 then
+				manifest.source = url
+				return manifest
+			end
+		else
+			os.remove(path)
+		end
+	end
+	return nil, "无法获取更新信息，请检查路由器网络或稍后重试"
+end
+
+local function check_update()
+	local current = trim(read_file("/usr/share/passwall-device/VERSION") or "0.0.0")
+	local manifest, err = fetch_update_manifest()
+	if not manifest then return {ok=false, current=current, error=err} end
+	return {
+		ok=true, current=current, latest=manifest.version,
+		available=version_newer(manifest.version, current),
+		notes=manifest.notes or "", published_at=manifest.published_at or "", source=manifest.source
+	}
+end
+
+local function install_update()
+	local current = trim(read_file("/usr/share/passwall-device/VERSION") or "0.0.0")
+	local manifest, err = fetch_update_manifest()
+	if not manifest then return {ok=false, current=current, error=err} end
+	if not version_newer(manifest.version, current) then
+		return {ok=false, current=current, latest=manifest.version, error="当前已经是最新版本"}
+	end
+	local ipk = "/tmp/passwall-device-update-" .. tostring(nixio.getpid()) .. ".ipk"
+	local log = "/tmp/passwall-device-update.log"
+	os.remove(ipk)
+	local rc = sys.call("curl -4 -fsSL --connect-timeout 8 --max-time 120 " .. shellquote(manifest.ipk_url) .. " -o " .. shellquote(ipk) .. " 2>" .. shellquote(log))
+	if rc ~= 0 then os.remove(ipk); return {ok=false, error="更新包下载失败", details=trim(read_file(log) or "")} end
+	local actual = trim(sys.exec("sha256sum " .. shellquote(ipk) .. " 2>/dev/null | cut -d' ' -f1") or ""):lower()
+	if actual ~= tostring(manifest.sha256):lower() then
+		os.remove(ipk)
+		return {ok=false, error="更新包校验失败，已拒绝安装"}
+	end
+	rc = sys.call("opkg install " .. shellquote(ipk) .. " >" .. shellquote(log) .. " 2>&1")
+	os.remove(ipk)
+	if rc ~= 0 then return {ok=false, error="更新安装失败", details=trim(read_file(log) or "")} end
+	local installed = trim(read_file("/usr/share/passwall-device/VERSION") or current)
+	return {ok=true, previous=current, version=installed, message="更新完成，页面即将刷新"}
+end
+
 local action=arg[1] or "status"
 if action=="status" then reply(list_status())
 elseif action=="extract" then local links, ignored=extract_links(read_file(arg[2]) or ""); reply({ok=true,links=links,ignored=ignored})
 elseif action=="import" then reply(import_nodes(arg[2],arg[3],arg[4],arg[5],arg[6],arg[7]))
 elseif action=="bind" then reply(bind(arg[2] or "",arg[3] or ""))
 elseif action=="toggle" then reply(toggle(arg[2]))
-elseif action=="delete-node" then reply(delete_node(arg[2] or "",arg[3] or ""))
-elseif action=="unbind" then reply(unbind(arg[2] or ""))
+elseif action=="delete-node" then reply(delete_nodes(arg[2] or "",arg[3] or ""))
+elseif action=="delete-nodes" then reply(delete_nodes(arg[2] or "",arg[3] or ""))
+elseif action=="unbind" then reply(unbind_many(arg[2] or ""))
+elseif action=="unbind-many" then reply(unbind_many(arg[2] or ""))
 elseif action=="test-node" then reply(test_node(arg[2] or ""))
 elseif action=="update-node" then reply(update_node(arg[2] or "",arg[3] or "",arg[4] or ""))
+elseif action=="update-binding" then reply(update_binding(arg[2] or "",arg[3] or ""))
+elseif action=="check-update" then reply(check_update())
+elseif action=="install-update" then reply(install_update())
 elseif action=="migrate" then reply(migrate_acls())
 elseif action=="prune-offline" then reply(prune_offline())
 elseif action=="cleanup-acls" then reply(cleanup_acls())

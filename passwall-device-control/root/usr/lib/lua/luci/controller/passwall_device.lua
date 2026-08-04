@@ -37,9 +37,14 @@ function index()
 	entry({"admin", "services", "passwall_device", "api", "import"}, call("api_import")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "toggle"}, call("api_toggle")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "delete"}, call("api_delete")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "delete-many"}, call("api_delete_many")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "unbind"}, call("api_unbind")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "unbind-many"}, call("api_unbind_many")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "test"}, call("api_test")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "edit"}, call("api_edit")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "edit-binding"}, call("api_edit_binding")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "version"}, call("api_version")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "update"}, call("api_update")).leaf = true
 
 	local portal = entry({"pwc"}, template("passwall_device/portal"))
 	portal.sysauth = false
@@ -73,9 +78,22 @@ end
 
 function api_toggle() json(run("toggle", {http.formvalue("enabled") or "0"})) end
 function api_delete() json(run("delete-node", {http.formvalue("node_id") or "", http.formvalue("replacement") or ""})) end
+function api_delete_many()
+	local ids = http.formvalue("node_ids") or ""
+	if #ids > 65535 then return json({ok=false, error="批量节点参数过长"}) end
+	json(run("delete-nodes", {ids, http.formvalue("replacement") or ""}))
+end
 function api_unbind() json(run("unbind", {http.formvalue("binding_id") or ""})) end
+function api_unbind_many()
+	local ids = http.formvalue("binding_ids") or ""
+	if #ids > 65535 then return json({ok=false, error="批量设备参数过长"}) end
+	json(run("unbind-many", {ids}))
+end
 function api_test() json(run("test-node", {http.formvalue("node_id") or ""})) end
 function api_edit() json(run("update-node", {http.formvalue("node_id") or "", http.formvalue("remarks") or "", http.formvalue("code") or ""})) end
+function api_edit_binding() json(run("update-binding", {http.formvalue("binding_id") or "", http.formvalue("remark") or ""})) end
+function api_version() json(run("check-update")) end
+function api_update() json(run("install-update")) end
 
 function portal_login()
 	local code = http.formvalue("code") or ""

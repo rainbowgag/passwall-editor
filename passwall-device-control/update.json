@@ -1,0 +1,7 @@
+{
+  "version": "0.3.0",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.3.0_all.ipk",
+  "sha256": "8b3d0fecbb2209b90880a67b200572999b27b769fea88f8b80ab6781c6540923",
+  "published_at": "2026-08-05",
+  "notes": "支持一口令多设备、节点和口令点击修改、设备备注、节点与设备批量操作及在线更新。"
+}

@@ -1,12 +1,13 @@
 <%+header%>
 <style>
-.pwc-wrap{max-width:1200px;margin:0 auto}.pwc-card{background:var(--background-color-high,#fff);border:1px solid #ddd;border-radius:8px;padding:16px;margin:14px 0}.pwc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pwc-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwc-input{box-sizing:border-box;width:100%;padding:9px;border:1px solid #bbb;border-radius:5px}.pwc-small{width:110px}.pwc-code{font-family:monospace}.pwc-muted{color:#777}.pwc-good{color:#16803c}.pwc-bad{color:#c62828}.pwc-table{width:100%;border-collapse:collapse}.pwc-table th,.pwc-table td{padding:8px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}.pwc-table-wrap{overflow:auto}.pwc-badge{display:inline-block;padding:2px 7px;border-radius:10px;background:#eee}.pwc-actions button{margin:2px}@media(max-width:760px){.pwc-grid{grid-template-columns:1fr}.pwc-table{font-size:12px}}
+.pwc-wrap{max-width:1200px;margin:0 auto}.pwc-card{background:var(--background-color-high,#fff);border:1px solid #ddd;border-radius:8px;padding:16px;margin:14px 0}.pwc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pwc-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwc-title{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.pwc-title h3{margin:0}.pwc-input{box-sizing:border-box;width:100%;padding:9px;border:1px solid #bbb;border-radius:5px}.pwc-small{width:110px}.pwc-code{font-family:monospace}.pwc-muted{color:#777}.pwc-good{color:#16803c}.pwc-bad{color:#c62828}.pwc-table{width:100%;border-collapse:collapse}.pwc-table th,.pwc-table td{padding:8px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}.pwc-table-wrap{overflow:auto}.pwc-badge{display:inline-block;padding:2px 7px;border-radius:10px;background:#eee}.pwc-actions button{margin:2px}.pwc-editable{cursor:pointer;border-bottom:1px dashed #777}.pwc-editable:hover{color:#4b65d1}.pwc-check{width:18px;height:18px}.pwc-version{margin-left:auto}@media(max-width:760px){.pwc-grid{grid-template-columns:1fr}.pwc-table{font-size:12px}.pwc-version{margin-left:0}}
 </style>
 <div class="pwc-wrap">
  <h2>PassWall 设备口令</h2>
  <div class="pwc-card">
-  <div class="pwc-row"><strong>服务状态：</strong><span id="service_state">读取中</span><button id="toggle_btn" class="btn cbi-button cbi-button-action">启用认证服务</button><button id="refresh_btn" class="btn cbi-button">刷新</button></div>
-  <p class="pwc-muted">未绑定设备连接默认 Wi‑Fi 后输入节点口令；手动入口：<code>http://bind.lan</code>。启用后，未认证设备将无法访问外网；无线设备持续离线 60 秒会自动解绑并释放口令。</p>
+  <div class="pwc-row"><strong>服务状态：</strong><span id="service_state">读取中</span><button id="toggle_btn" class="btn cbi-button cbi-button-action">启用认证服务</button><button id="refresh_btn" class="btn cbi-button">刷新</button><span class="pwc-version">当前版本：<strong id="current_version">--</strong>　最新版本：<strong id="latest_version">未检测</strong></span><button id="check_update_btn" class="btn cbi-button">检查更新</button><button id="update_btn" class="btn cbi-button cbi-button-action" style="display:none">更新</button></div>
+  <p id="update_notes" class="pwc-muted" style="display:none"></p>
+  <p class="pwc-muted">未绑定设备连接默认 Wi‑Fi 后输入节点口令；手动入口：<code>http://bind.lan</code>。同一口令可供多台设备同时使用，且每台设备独立走该节点；启用后，未认证设备无法访问外网；无线设备持续离线 60 秒会自动解绑。</p>
  </div>
  <div class="pwc-card">
   <h3>批量导入节点</h3>
@@ -20,8 +21,8 @@
    </div>
   </div>
  </div>
- <div class="pwc-card"><h3>节点与口令</h3><div class="pwc-table-wrap"><table class="pwc-table"><thead><tr><th>节点</th><th>协议/地址</th><th>口令</th><th>状态</th><th>操作</th></tr></thead><tbody id="nodes_body"></tbody></table></div></div>
- <div class="pwc-card"><h3>设备绑定</h3><div class="pwc-table-wrap"><table class="pwc-table"><thead><tr><th>设备</th><th>MAC / IP</th><th>节点</th><th>时间</th><th>操作</th></tr></thead><tbody id="bindings_body"></tbody></table></div></div>
+ <div class="pwc-card"><div class="pwc-title"><h3>节点与口令</h3><button id="delete_nodes_btn" class="btn cbi-button cbi-button-negative">批量删除</button></div><div class="pwc-table-wrap"><table class="pwc-table"><thead><tr><th><input id="nodes_all" class="pwc-check" type="checkbox" title="全选节点"></th><th>节点（点击修改）</th><th>协议/地址</th><th>口令（点击修改）</th><th>状态</th><th>操作</th></tr></thead><tbody id="nodes_body"></tbody></table></div></div>
+ <div class="pwc-card"><div class="pwc-title"><h3>设备绑定</h3><button id="unbind_many_btn" class="btn cbi-button cbi-button-negative">批量解绑并断网</button></div><div class="pwc-table-wrap"><table class="pwc-table"><thead><tr><th><input id="bindings_all" class="pwc-check" type="checkbox" title="全选设备"></th><th>设备（点击备注）</th><th>MAC / IP</th><th>节点</th><th>时间</th><th>操作</th></tr></thead><tbody id="bindings_body"></tbody></table></div></div>
  <div class="pwc-card"><h3>最近日志</h3><pre id="logs" class="pwc-muted pwc-code" style="white-space:pre-wrap"></pre></div>
 </div>
 <script>
@@ -31,21 +32,55 @@
  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  async function post(path,data){const body=new URLSearchParams(data||{});const r=await fetch(base+'/'+path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});return r.json()}
  async function load(){try{const r=await fetch(base+'/status');state=await r.json();render()}catch(e){document.getElementById('service_state').textContent='读取失败：'+e.message}}
+ function checked(selector){return Array.from(document.querySelectorAll(selector+':checked')).map(x=>x.value)}
+ function nodeStatus(n){
+  if(!n.device_count)return '<span class="pwc-muted">空闲</span>';
+  const title=esc((n.devices||[]).join('、'));
+  if(n.online_count)return '<span class="pwc-good" title="'+title+'">'+esc(n.online_count)+' / '+esc(n.device_count)+' 台在线</span>';
+  return '<span class="pwc-bad" title="'+title+'">'+esc(n.device_count)+' 台均离线，等待自动解绑</span>';
+ }
  function render(){
   const ss=document.getElementById('service_state');ss.innerHTML=state.enabled?'<span class="pwc-good">已启用</span>':'<span class="pwc-bad">未启用</span>';
   const tb=document.getElementById('toggle_btn');tb.textContent=state.enabled?'停用认证服务':'启用认证服务';
-  document.getElementById('nodes_body').innerHTML=(state.nodes||[]).map(n=>`<tr><td>${esc(n.remarks)}</td><td>${esc(n.protocol||n.type)}<br><span class="pwc-muted">${esc(n.address)}:${esc(n.port)}</span></td><td><code>${esc(n.code)}</code></td><td>${n.bound?(n.online?'<span class="pwc-good">已连接 '+esc(n.device)+'</span>':'<span class="pwc-bad">离线，等待自动解绑</span>'):'<span class="pwc-muted">空闲</span>'}</td><td class="pwc-actions"><button class="btn cbi-button" data-edit="${esc(n.id)}" data-name="${esc(n.remarks)}" data-code="${esc(n.code)}">编辑</button><button class="btn cbi-button" data-test="${esc(n.id)}">检测</button><button class="btn cbi-button cbi-button-negative" data-delete="${esc(n.id)}" data-name="${esc(n.remarks)}">删除</button></td></tr>`).join('')||'<tr><td colspan="5" class="pwc-muted">暂无托管节点</td></tr>';
-  document.getElementById('bindings_body').innerHTML=(state.bindings||[]).map(b=>`<tr><td>${esc(b.hostname)}</td><td><code>${esc(b.mac)}</code><br>${esc(b.ip)}</td><td>${esc(b.node)}<br>${b.online?'<span class="pwc-good">已连接</span>':'<span class="pwc-bad">离线，等待自动解绑</span>'}</td><td>${esc(b.bound_at)}</td><td><button class="btn cbi-button cbi-button-negative" data-unbind="${esc(b.id)}">解绑并断网</button></td></tr>`).join('')||'<tr><td colspan="5" class="pwc-muted">暂无绑定设备</td></tr>';
+  document.getElementById('current_version').textContent=state.version||'--';
+  document.getElementById('nodes_all').checked=false;document.getElementById('bindings_all').checked=false;
+  document.getElementById('nodes_body').innerHTML=(state.nodes||[]).map(n=>`<tr><td><input class="pwc-check node-check" type="checkbox" value="${esc(n.id)}"></td><td><span class="pwc-editable" title="点击修改节点名称" data-node-name="${esc(n.id)}" data-name="${esc(n.remarks)}" data-code="${esc(n.code)}">${esc(n.remarks)}</span></td><td>${esc(n.protocol||n.type)}<br><span class="pwc-muted">${esc(n.address)}:${esc(n.port)}</span></td><td><code class="pwc-editable" title="点击修改口令" data-node-code="${esc(n.id)}" data-name="${esc(n.remarks)}" data-code="${esc(n.code)}">${esc(n.code)}</code></td><td>${nodeStatus(n)}</td><td class="pwc-actions"><button class="btn cbi-button" data-test="${esc(n.id)}">检测</button><button class="btn cbi-button cbi-button-negative" data-delete="${esc(n.id)}" data-name="${esc(n.remarks)}">删除</button></td></tr>`).join('')||'<tr><td colspan="6" class="pwc-muted">暂无托管节点</td></tr>';
+  document.getElementById('bindings_body').innerHTML=(state.bindings||[]).map(b=>`<tr><td><input class="pwc-check binding-check" type="checkbox" value="${esc(b.id)}"></td><td><span class="pwc-editable" title="点击设置设备备注；留空恢复系统名称" data-binding-edit="${esc(b.id)}" data-remark="${esc(b.remark)}" data-hostname="${esc(b.system_hostname)}">${esc(b.hostname)}</span></td><td><code>${esc(b.mac)}</code><br>${esc(b.ip)}</td><td>${esc(b.node)}<br>${b.online?'<span class="pwc-good">已连接</span>':'<span class="pwc-bad">离线，等待自动解绑</span>'}</td><td>${esc(b.bound_at)}</td><td><button class="btn cbi-button cbi-button-negative" data-unbind="${esc(b.id)}">解绑并断网</button></td></tr>`).join('')||'<tr><td colspan="6" class="pwc-muted">暂无绑定设备</td></tr>';
   document.getElementById('logs').textContent=state.logs||'暂无日志';
   document.querySelectorAll('[data-test]').forEach(x=>x.onclick=async()=>{x.disabled=true;const r=await post('test',{node_id:x.dataset.test});alert(r.message||r.error||'完成');x.disabled=false});
-  document.querySelectorAll('[data-edit]').forEach(x=>x.onclick=async()=>{const remarks=prompt('请输入新的节点名称：',x.dataset.name);if(remarks===null)return;const code=prompt('请输入新的口令：',x.dataset.code);if(code===null)return;const r=await post('edit',{node_id:x.dataset.edit,remarks,code});alert(r.ok?'节点名称和口令已更新':r.error);if(r.ok)load()});
-  document.querySelectorAll('[data-delete]').forEach(x=>x.onclick=async()=>{const replacement=prompt('删除节点“'+x.dataset.name+'”\n\n输入其他节点的完整名称：绑定设备将迁移过去。\n留空并确定：节点和对应设备绑定会被删除，设备立即断网。','');if(replacement===null)return;if(!confirm(replacement?'确认删除并迁移到“'+replacement+'”？':'确认删除节点及对应设备绑定？'))return;const r=await post('delete',{node_id:x.dataset.delete,replacement});alert(r.ok?'操作完成':r.error);load()});
-  document.querySelectorAll('[data-unbind]').forEach(x=>x.onclick=async()=>{if(!confirm('确认解绑？该设备会立即断网并重新要求口令。'))return;const r=await post('unbind',{binding_id:x.dataset.unbind});alert(r.ok?'已解绑':r.error);load()});
+  document.querySelectorAll('[data-node-name]').forEach(x=>x.onclick=async()=>{const remarks=prompt('请输入新的节点名称：',x.dataset.name);if(remarks===null||remarks===x.dataset.name)return;const r=await post('edit',{node_id:x.dataset.nodeName,remarks,code:x.dataset.code});alert(r.ok?'节点名称已更新':r.error);if(r.ok)load()});
+  document.querySelectorAll('[data-node-code]').forEach(x=>x.onclick=async()=>{const code=prompt('请输入新的口令：',x.dataset.code);if(code===null||code===x.dataset.code)return;const r=await post('edit',{node_id:x.dataset.nodeCode,remarks:x.dataset.name,code});alert(r.ok?'口令已更新':r.error);if(r.ok)load()});
+  document.querySelectorAll('[data-binding-edit]').forEach(x=>x.onclick=async()=>{const remark=prompt('请输入设备备注；留空并确定可恢复系统设备名称：',x.dataset.remark);if(remark===null||remark===x.dataset.remark)return;const r=await post('edit-binding',{binding_id:x.dataset.bindingEdit,remark});alert(r.ok?'设备备注已更新':r.error);if(r.ok)load()});
+  document.querySelectorAll('[data-delete]').forEach(x=>x.onclick=()=>deleteNodes([x.dataset.delete],x.dataset.name));
+  document.querySelectorAll('[data-unbind]').forEach(x=>x.onclick=()=>unbindMany([x.dataset.unbind]));
  }
+ async function deleteNodes(ids,label){
+  if(!ids.length)return alert('请先勾选节点。');
+  const replacement=prompt('将删除'+(label?'节点“'+label+'”':ids.length+' 个节点')+'。\n\n输入未被选中节点的完整名称：其绑定设备会全部迁移过去。\n留空并确定：删除节点及其全部设备绑定，相关设备立即断网。','');
+  if(replacement===null)return;
+  if(!confirm(replacement?'确认删除并将全部绑定设备迁移到“'+replacement+'”？':'确认删除所选节点及其全部设备绑定？'))return;
+  const r=await post('delete-many',{node_ids:ids.join(','),replacement});alert(r.ok?'操作完成：已删除 '+r.deleted+' 个节点，处理 '+r.affected+' 台设备。':r.error);load();
+ }
+ async function unbindMany(ids){
+  if(!ids.length)return alert('请先勾选设备。');
+  if(!confirm('确认解绑所选 '+ids.length+' 台设备？它们会立即断网并重新要求输入口令。'))return;
+  const r=await post('unbind-many',{binding_ids:ids.join(',')});alert(r.ok?'已解绑 '+r.removed+' 台设备。':r.error);load();
+ }
+ async function checkVersion(showResult){
+  const btn=document.getElementById('check_update_btn'),latest=document.getElementById('latest_version'),update=document.getElementById('update_btn'),notes=document.getElementById('update_notes');
+  btn.disabled=true;latest.textContent='检测中…';
+  try{const r=await fetch(base+'/version').then(x=>x.json());if(!r.ok){latest.textContent='检测失败';if(showResult)alert(r.error);return}latest.textContent=r.latest;notes.textContent=r.notes||'';notes.style.display=r.notes?'block':'none';update.style.display=r.available?'inline-block':'none';if(showResult)alert(r.available?'发现新版本 '+r.latest:'当前已经是最新版本');}catch(e){latest.textContent='检测失败';if(showResult)alert('检查更新失败：'+e.message)}finally{btn.disabled=false}
+ }
+ document.getElementById('nodes_all').onchange=function(){document.querySelectorAll('.node-check').forEach(x=>x.checked=this.checked)};
+ document.getElementById('bindings_all').onchange=function(){document.querySelectorAll('.binding-check').forEach(x=>x.checked=this.checked)};
+ document.getElementById('delete_nodes_btn').onclick=()=>deleteNodes(checked('.node-check'));
+ document.getElementById('unbind_many_btn').onclick=()=>unbindMany(checked('.binding-check'));
  document.getElementById('refresh_btn').onclick=load;
  document.getElementById('toggle_btn').onclick=async()=>{if(!state.enabled&&!confirm('启用后，默认 Wi‑Fi 中尚未输入口令的设备将无法访问外网。确认启用？'))return;const r=await post('toggle',{enabled:state.enabled?'0':'1'});alert(r.ok?'状态已更新':r.error);load()};
+ document.getElementById('check_update_btn').onclick=()=>checkVersion(true);
+ document.getElementById('update_btn').onclick=async function(){if(!confirm('确认下载并安装最新版本？配置和现有设备绑定会保留。'))return;this.disabled=true;this.textContent='更新中…';try{const r=await post('update',{});alert(r.ok?'已更新到 '+r.version:r.error+(r.details?'\n'+r.details:''));if(r.ok)setTimeout(()=>location.reload(),1500)}catch(e){alert('更新请求已结束，管理服务可能正在重启；页面将自动刷新。');setTimeout(()=>location.reload(),3000)}finally{this.disabled=false;this.textContent='更新'}};
  document.getElementById('import_btn').onclick=async function(){this.disabled=true;const out=document.getElementById('import_result');out.textContent='正在导入…';const r=await post('import',{links:document.getElementById('links').value,prefix:document.getElementById('prefix').value,start:document.getElementById('start').value,code_prefix:document.getElementById('code_prefix').value,code_start:document.getElementById('code_start').value,code_width:document.getElementById('code_width').value});out.textContent=r.ok?'成功导入 '+r.imported+' 个节点；提取 '+r.extracted+' 条；忽略 '+r.ignored+' 行。\n'+(r.nodes||[]).map(n=>n.remarks+'  →  '+n.code).join('\n'):(r.error||'导入失败')+(r.details?'\n'+r.details:'');this.disabled=false;load()};
- load();
+ load().then(()=>checkVersion(false));
 })();
 </script>
 <%+footer%>
