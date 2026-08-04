@@ -36,13 +36,13 @@ opkg install luci-app-passwall-device_0.2.1_all.ipk
 GitHub 一键安装或升级：
 
 ```sh
-curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.2.1_all.ipk && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device restart
+curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.2.1_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "b2fd6baebc93763039eccff8bc1de968996ecefa27cff0fd0f920fcc77149918" ] && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device restart
 ```
 
 VPS 一键安装或升级：
 
 ```sh
-wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.2.1_all.ipk && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device restart
+wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.2.1_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "b2fd6baebc93763039eccff8bc1de968996ecefa27cff0fd0f920fcc77149918" ] && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device restart
 ```
 
 在 OpenWrt/Linux 环境构建该固件兼容的 IPK：
