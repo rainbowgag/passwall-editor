@@ -1,0 +1,85 @@
+module("luci.controller.passwall_device", package.seeall)
+
+local http = require "luci.http"
+local sys = require "luci.sys"
+local util = require "luci.util"
+local jsonc = require "luci.jsonc"
+local uci_model = require "luci.model.uci"
+local nixio = require "nixio"
+
+local CONFIG = "passwall_device"
+local APP = "/usr/share/passwall-device/app.lua"
+
+local function json(data)
+	http.prepare_content("application/json")
+	http.write(jsonc.stringify(data or {}))
+end
+
+local function run(action, args)
+	local command = "lua " .. util.shellquote(APP) .. " " .. util.shellquote(action)
+	for _, value in ipairs(args or {}) do
+		command = command .. " " .. util.shellquote(tostring(value or ""))
+	end
+	local output = sys.exec(command .. " 2>&1")
+	local parsed = jsonc.parse(output or "")
+	if parsed then return parsed end
+	return { ok = false, error = output ~= "" and output or "后台命令执行失败" }
+end
+
+function index()
+	if not nixio.fs.access("/etc/config/" .. CONFIG) then return end
+
+	local page = entry({"admin", "services", "passwall_device"}, template("passwall_device/main"), _("PassWall 设备口令"), 3)
+	page.dependent = true
+	page.acl_depends = { "luci-app-passwall-device" }
+
+	entry({"admin", "services", "passwall_device", "api", "status"}, call("api_status")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "import"}, call("api_import")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "toggle"}, call("api_toggle")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "delete"}, call("api_delete")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "unbind"}, call("api_unbind")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "test"}, call("api_test")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "edit"}, call("api_edit")).leaf = true
+
+	local portal = entry({"pwc"}, template("passwall_device/portal"))
+	portal.sysauth = false
+	portal.dependent = false
+	portal.leaf = true
+	local login = entry({"pwc", "login"}, call("portal_login"))
+	login.sysauth = false
+	login.dependent = false
+	login.leaf = true
+end
+
+function api_status() json(run("status")) end
+
+function api_import()
+	local links = http.formvalue("links") or ""
+	local prefix = http.formvalue("prefix") or ""
+	local start = http.formvalue("start") or "1"
+	local code_prefix = http.formvalue("code_prefix") or ""
+	local code_start = http.formvalue("code_start") or "1"
+	local code_width = http.formvalue("code_width") or "3"
+	if #links > 524288 then return json({ok=false, error="导入内容不能超过 512KB"}) end
+	local path = "/tmp/pwc-import-" .. tostring(nixio.getpid()) .. ".txt"
+	local f = io.open(path, "w")
+	if not f then return json({ok=false, error="无法创建导入临时文件"}) end
+	f:write(links)
+	f:close()
+	local result = run("import", {path, prefix, start, code_prefix, code_start, code_width})
+	os.remove(path)
+	json(result)
+end
+
+function api_toggle() json(run("toggle", {http.formvalue("enabled") or "0"})) end
+function api_delete() json(run("delete-node", {http.formvalue("node_id") or "", http.formvalue("replacement") or ""})) end
+function api_unbind() json(run("unbind", {http.formvalue("binding_id") or ""})) end
+function api_test() json(run("test-node", {http.formvalue("node_id") or ""})) end
+function api_edit() json(run("update-node", {http.formvalue("node_id") or "", http.formvalue("remarks") or "", http.formvalue("code") or ""})) end
+
+function portal_login()
+	local code = http.formvalue("code") or ""
+	if #code > 128 then return json({ok=false, error="口令格式错误"}) end
+	local ip = http.getenv("REMOTE_ADDR") or ""
+	json(run("bind", {ip, code}))
+end

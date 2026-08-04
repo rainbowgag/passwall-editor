@@ -1,0 +1,22 @@
+#!/bin/sh
+
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+if [ ! -f /etc/config/passwall_device ]; then
+	for saved_config in /etc/config/passwall_device-opkg /etc/config/passwall_device-opkg.backup; do
+		[ -s "$saved_config" ] && { cp -p "$saved_config" /etc/config/passwall_device; break; }
+	done
+fi
+[ -f /etc/config/passwall_device ] || cp -p /usr/share/passwall-device/default-config /etc/config/passwall_device
+chmod 755 /etc/init.d/passwall-device /usr/share/passwall-device/*.sh /usr/share/passwall-device/app.lua
+chmod 644 /usr/lib/lua/luci/controller/passwall_device.lua /usr/lib/lua/luci/view/passwall_device/*.htm /usr/share/rpcd/acl.d/luci-app-passwall-device.json /usr/share/passwall-device/VERSION
+previous_enabled="$(uci -q get passwall.@global[0].enabled || echo 0)"
+previous_acl="$(uci -q get passwall.@global[0].acl_enable || echo 0)"
+uci -q get passwall_device.global.previous_passwall_enabled >/dev/null || uci set passwall_device.global.previous_passwall_enabled="$previous_enabled"
+uci -q get passwall_device.global.previous_acl_enable >/dev/null || uci set passwall_device.global.previous_acl_enable="$previous_acl"
+uci commit passwall_device
+/usr/share/passwall-device/app.lua migrate >/tmp/pwc-migrate.log 2>&1 || true
+/etc/init.d/passwall-device enable
+rm -rf /tmp/luci-indexcache /tmp/luci-modulecache /tmp/luci-*
+/etc/init.d/rpcd restart >/dev/null 2>&1 || true
+/etc/init.d/nginx reload >/dev/null 2>&1 || true
+exit 0

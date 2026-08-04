@@ -1,0 +1,8 @@
+Package: luci-app-passwall-device
+Version: 0.2.1
+Architecture: all
+Maintainer: local
+Depends: luci-compat, luci-lua-runtime, luci-app-passwall, firewall4, nftables, curl, xray-core
+Section: luci
+Priority: optional
+Description: PassWall bulk node import and per-device password binding portal

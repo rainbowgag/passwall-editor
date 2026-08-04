@@ -1,0 +1,31 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+start_service() {
+	[ "$(uci -q get passwall_device.global.enabled)" = "1" ] || return 0
+	/usr/share/passwall-device/portal-setup.sh setup
+	/usr/share/passwall-device/firewall.sh setup
+	procd_open_instance
+	procd_set_param command /bin/sh /usr/share/passwall-device/guard.sh
+	procd_set_param respawn 5 5 0
+	procd_close_instance
+}
+
+reload_service() {
+	[ "$(uci -q get passwall_device.global.enabled)" = "1" ] || { stop_service; return 0; }
+	/usr/share/passwall-device/portal-setup.sh setup
+	/usr/share/passwall-device/firewall.sh setup
+}
+
+stop_service() {
+	/usr/share/passwall-device/firewall.sh stop
+	/usr/share/passwall-device/portal-setup.sh stop
+}
+
+service_triggers() {
+	procd_add_reload_trigger passwall_device network dhcp
+}
+

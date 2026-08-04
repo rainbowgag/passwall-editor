@@ -1,0 +1,29 @@
+#!/bin/sh
+
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+[ "${PKG_UPGRADE:-0}" = "1" ] && exit 0
+[ "${1:-}" = "upgrade" ] && exit 0
+/etc/init.d/passwall-device stop >/dev/null 2>&1 || true
+/etc/init.d/passwall-device disable >/dev/null 2>&1 || true
+
+if [ -f /etc/config/passwall_device ]; then
+	/usr/share/passwall-device/app.lua cleanup-acls >/dev/null 2>&1 || true
+	for section in $(uci -q show passwall_device | sed -n 's/^passwall_device\.\([^.=]*\)=binding$/\1/p'); do
+		acl="$(uci -q get passwall_device.$section.acl_id || true)"
+		mac="$(uci -q get passwall_device.$section.mac || true)"
+		[ -n "$acl" ] && uci -q delete "passwall.$acl" || true
+		[ -n "$mac" ] && uci -q delete "dhcp.pwc_$(echo "$mac" | tr -d ':' | tr 'A-F' 'a-f')" || true
+	done
+	for section in $(uci -q show passwall_device | sed -n 's/^passwall_device\.\([^.=]*\)=node$/\1/p'); do
+		node="$(uci -q get passwall_device.$section.passwall_id || true)"
+		[ -n "$node" ] && uci -q delete "passwall.$node" || true
+	done
+	uci set passwall.@global[0].enabled="$(uci -q get passwall_device.global.previous_passwall_enabled || echo 0)"
+	uci set passwall.@global[0].acl_enable="$(uci -q get passwall_device.global.previous_acl_enable || echo 0)"
+	uci commit passwall
+	uci commit dhcp
+	rm -f /etc/config/passwall_device /etc/config/passwall_device-opkg
+	/etc/init.d/passwall restart >/dev/null 2>&1 || true
+	/etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
+fi
+exit 0

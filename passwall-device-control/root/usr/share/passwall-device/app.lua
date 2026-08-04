@@ -1,0 +1,672 @@
+#!/usr/bin/lua
+
+local uci = require "uci"
+local jsonc = require "luci.jsonc"
+local sys = require "luci.sys"
+local nixio = require "nixio"
+
+local CFG = "passwall_device"
+local PW = "passwall"
+local cursor = uci.cursor()
+
+local function reply(t)
+	io.write(jsonc.stringify(t or {}), "\n")
+end
+
+local function trim(s)
+	return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function scalar(value, fallback)
+	if type(value) == "table" then value = value[1] end
+	if value == nil or value == "" then value = fallback end
+	return tostring(value or "")
+end
+
+local function shellquote(s)
+	return "'" .. tostring(s or ""):gsub("'", "'\\''") .. "'"
+end
+
+local function valid_id(s)
+	return tostring(s or ""):match("^[%w_%-]+$") ~= nil
+end
+
+local function percent_encode(s)
+	return (tostring(s or ""):gsub("([^%w%-_%.~])", function(c)
+		return string.format("%%%02X", string.byte(c))
+	end))
+end
+
+local function percent_decode(s)
+	return (tostring(s or ""):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+end
+
+local section_counter = 0
+local function new_section(c, config, section_type, prefix, values)
+	section_counter = section_counter + 1
+	local id
+	repeat
+		id = (prefix or "pwc_") .. string.format("%08x%04x%02x", os.time() % 4294967296, nixio.getpid() % 65536, section_counter % 256)
+		section_counter = section_counter + 1
+	until not c:get(config, id)
+	c:set(config, id, section_type)
+	for key, value in pairs(values or {}) do c:set(config, id, key, tostring(value)) end
+	return id
+end
+
+local function read_file(path)
+	local f = io.open(path, "r")
+	if not f then return nil end
+	local data = f:read("*a")
+	f:close()
+	return data
+end
+
+local function node_map(c)
+	local out = {}
+	c:foreach(PW, "nodes", function(s)
+		out[s[".name"]] = s
+	end)
+	return out
+end
+
+local function metadata_for_node(c, node_id)
+	local found
+	c:foreach(CFG, "node", function(s)
+		if s.passwall_id == node_id then found = s end
+	end)
+	return found
+end
+
+local function binding_for_mac(c, mac)
+	local found
+	c:foreach(CFG, "binding", function(s)
+		if (s.mac or ""):lower() == (mac or ""):lower() then found = s end
+	end)
+	return found
+end
+
+local function binding_for_node(c, node_id)
+	local found
+	c:foreach(CFG, "binding", function(s)
+		if s.node_id == node_id then found = s end
+	end)
+	return found
+end
+
+local function find_node_by_remark(c, remark)
+	local found
+	c:foreach(PW, "nodes", function(s)
+		if s.remarks == remark then found = s end
+	end)
+	return found
+end
+
+local function wifi_clients()
+	local clients = {}
+	local scanned = false
+	local objects = sys.exec("ubus list 'hostapd.*' 2>/dev/null") or ""
+	for object in objects:gmatch("[^\r\n]+") do
+		object = trim(object)
+		if object:match("^hostapd%.[%w_.%-]+$") then
+			local data = jsonc.parse(sys.exec("ubus call " .. shellquote(object) .. " get_clients 2>/dev/null") or "")
+			if type(data) == "table" and type(data.clients) == "table" then
+				scanned = true
+				for mac, info in pairs(data.clients) do
+					if tostring(mac):match("^[%x][%x]:[%x][%x]:[%x][%x]:[%x][%x]:[%x][%x]:[%x][%x]$") and
+					   (type(info) ~= "table" or info.assoc ~= false) then
+						clients[mac:lower()] = true
+					end
+				end
+			end
+		end
+	end
+	return clients, scanned
+end
+
+local function list_status()
+	local c = uci.cursor()
+	local nodes = {}
+	local bindings = {}
+	local pw_nodes = node_map(c)
+	local wireless, wireless_scanned = wifi_clients()
+	c:foreach(CFG, "node", function(s)
+		local p = pw_nodes[s.passwall_id]
+		if p then
+			local b = binding_for_node(c, s.passwall_id)
+			nodes[#nodes + 1] = {
+				id=s.passwall_id, meta_id=s[".name"], remarks=p.remarks or s.remarks or s.passwall_id,
+				protocol=p.protocol or "", type=p.type or "", address=p.address or "", port=p.port or "",
+				code=s.code or "", bound=b ~= nil, device=b and (b.hostname or b.mac) or "",
+				online=b and wireless[(b.mac or ""):lower()] == true or false,
+				state=b and (b.state or "active") or "free"
+			}
+		end
+	end)
+	c:foreach(CFG, "binding", function(s)
+		local p = pw_nodes[s.node_id]
+		bindings[#bindings + 1] = {
+			id=s[".name"], mac=s.mac or "", ip=s.ip or "", hostname=s.hostname or "未知设备",
+			node_id=s.node_id or "", node=p and (p.remarks or s.node_id) or "节点已删除",
+			state=s.state or "active", bound_at=s.bound_at or "",
+			online=wireless[(s.mac or ""):lower()] == true
+		}
+	end)
+	table.sort(nodes, function(a,b) return a.remarks < b.remarks end)
+	table.sort(bindings, function(a,b) return a.bound_at > b.bound_at end)
+	return {
+		ok=true,
+		enabled=c:get(CFG, "global", "enabled") == "1",
+		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
+		nodes=nodes, bindings=bindings,
+		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.2.1"),
+		wireless_scanned=wireless_scanned,
+		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
+		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
+	}
+end
+
+local function extract_links(text)
+	local links, errors, seen = {}, {}, {}
+	local accepted = {vmess=true, vless=true, socks=true, socks5=true}
+	local function add(value)
+		value = trim(value):gsub("[,;%)%]，；。]+$", "")
+		if value ~= "" and not seen[value] then seen[value] = true; links[#links+1] = value end
+	end
+	for line in tostring(text or ""):gmatch("[^\r\n]+") do
+		local found = false
+		for scheme, value in line:gmatch("([%a][%w+.-]*)://([^%s<>\"']+)") do
+			scheme = scheme:lower()
+			if accepted[scheme] then add(scheme .. "://" .. value); found = true end
+		end
+		if not found then
+			local clean = trim(line)
+			local host, port, user, pass = clean:match("^([%w%.%-]+):(%d+):([^:]+):(.+)$")
+			if host and tonumber(port) and tonumber(port) <= 65535 then
+				add("socks5://" .. percent_encode(user) .. ":" .. percent_encode(pass) .. "@" .. host .. ":" .. port)
+				found = true
+			else
+				host, port = clean:match("^([%w%.%-]+):(%d+)$")
+				if host and tonumber(port) and tonumber(port) <= 65535 then add("socks5://" .. host .. ":" .. port); found = true end
+			end
+		end
+		if not found and trim(line) ~= "" then errors[#errors+1] = trim(line) end
+	end
+	return links, errors
+end
+
+local function parse_socks_link(link)
+	local scheme, rest = tostring(link):match("^(socks5?)://(.+)$")
+	if not scheme then return nil end
+	local fragment
+	rest, fragment = rest:match("^(.-)#(.*)$") or rest, rest:match("^.-#(.*)$")
+	local auth, endpoint = rest:match("^(.-)@(.+)$")
+	if not endpoint then endpoint = rest; auth = nil end
+	endpoint = endpoint:gsub("%?.*$", "")
+	local host, port = endpoint:match("^%[([^%]]+)%]:(%d+)$")
+	if not host then host, port = endpoint:match("^([^:]+):(%d+)$") end
+	port = tonumber(port or "")
+	if not host or not port or port < 1 or port > 65535 then return nil end
+	local username, password = "", ""
+	if auth and auth ~= "" then
+		username, password = auth:match("^([^:]*):(.*)$")
+		if not username then
+			local encoded = auth:gsub("-", "+"):gsub("_", "/")
+			encoded = encoded .. string.rep("=", (4 - #encoded % 4) % 4)
+			local ok, decoded = pcall(nixio.bin.b64decode, encoded)
+			if ok and decoded then username, password = decoded:match("^([^:]*):(.*)$") end
+		end
+	end
+	return {
+		host=percent_decode(host), port=port, username=percent_decode(username or ""),
+		password=percent_decode(password or ""), remarks=percent_decode(fragment or "")
+	}
+end
+
+local function import_nodes(path, prefix, start_number, code_prefix, code_start, code_width)
+	local text = read_file(path)
+	if not text then return {ok=false, error="无法读取导入内容"} end
+	local links, ignored = extract_links(text)
+	if #links == 0 then return {ok=false, error="没有找到 VMess、VLESS 或 SOCKS 节点"} end
+	local before = node_map(uci.cursor())
+	local official = {}
+	local socks_cursor = uci.cursor()
+	for _, link in ipairs(links) do
+		local socks = parse_socks_link(link)
+		if socks then
+			local id = new_section(socks_cursor, PW, "nodes", "pwc_node_", {
+				remarks=socks.remarks ~= "" and socks.remarks or ("SOCKS " .. socks.host .. ":" .. socks.port),
+				type="Xray", protocol="socks", address=socks.host, port=socks.port,
+				username=socks.username, password=socks.password
+			})
+		else
+			official[#official+1] = link
+		end
+	end
+	socks_cursor:commit(PW)
+	if #official > 0 then
+		local tmp = "/tmp/links.conf"
+		local f = io.open(tmp, "w")
+		if not f then return {ok=false, error="无法写入 PassWall 导入文件"} end
+		f:write(table.concat(official, "\n"), "\n")
+		f:close()
+		os.execute("lua /usr/share/passwall/subscribe.lua add pwc >/tmp/pwc-import.log 2>&1")
+	end
+	local c = uci.cursor()
+	local after = node_map(c)
+	local added = {}
+	for id, n in pairs(after) do if not before[id] then added[#added+1] = n end end
+	table.sort(added, function(a,b) return a[".name"] < b[".name"] end)
+	if #added == 0 then
+		return {ok=false, error="PassWall 未添加节点，可能全部重复或格式不受支持", details=trim(read_file("/tmp/pwc-import.log") or "")}
+	end
+	start_number = math.max(0, tonumber(start_number) or 1)
+	code_start = math.max(0, tonumber(code_start) or 1)
+	code_width = math.min(12, math.max(1, tonumber(code_width) or 3))
+	local results = {}
+	for i, n in ipairs(added) do
+		local remark = n.remarks or n[".name"]
+		if trim(prefix) ~= "" then remark = trim(prefix) .. tostring(start_number + i - 1) end
+		if find_node_by_remark(c, remark) and (find_node_by_remark(c, remark)[".name"] ~= n[".name"]) then
+			remark = remark .. "-" .. tostring(i)
+		end
+		c:set(PW, n[".name"], "remarks", remark)
+		local code = tostring(code_prefix or "") .. string.format("%0" .. tostring(code_width) .. "d", code_start + i - 1)
+		local collision = true
+		while collision do
+			collision = false
+			c:foreach(CFG, "node", function(s) if s.code == code then collision = true end end)
+			if collision then code_start = code_start + 1; code = tostring(code_prefix or "") .. string.format("%0" .. tostring(code_width) .. "d", code_start + i - 1) end
+		end
+		new_section(c, CFG, "node", "pwc_meta_", {passwall_id=n[".name"], remarks=remark, code=code, created_at=os.date("%Y-%m-%d %H:%M:%S")})
+		results[#results+1] = {id=n[".name"], remarks=remark, code=code, protocol=n.protocol or ""}
+	end
+	c:commit(PW)
+	c:commit(CFG)
+	return {ok=true, imported=#results, extracted=#links, ignored=#ignored, nodes=results, warnings=ignored}
+end
+
+local function ip_to_mac(ip)
+	if not tostring(ip):match("^%d+%.%d+%.%d+%.%d+$") then return nil end
+	sys.call("ping -c 1 -W 1 " .. shellquote(ip) .. " >/dev/null 2>&1")
+	local out = sys.exec("ip neigh show " .. shellquote(ip) .. " 2>/dev/null") or ""
+	return out:match("lladdr%s+([%x:]+)")
+end
+
+local function hostname_for(c, mac, ip)
+	local leases = read_file("/tmp/dhcp.leases") or ""
+	for line in leases:gmatch("[^\n]+") do
+		local _, lm, lip, host = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+		if lm and ((mac and lm:lower() == mac:lower()) or lip == ip) then return host ~= "*" and host or "未知设备" end
+	end
+	return "未知设备"
+end
+
+local function managed_acls_for_binding(c, binding)
+	local out = {}
+	if not binding then return out end
+	local marker = binding[".name"] or ""
+	local mac = (binding.mac or ""):lower()
+	c:foreach(PW, "acl_rule", function(s)
+		local raw_sources = s.sources or ""
+		if type(raw_sources) == "table" then raw_sources = table.concat(raw_sources, " ") end
+		local sources = " " .. tostring(raw_sources):lower() .. " "
+		local source_match = mac ~= "" and sources:find(" " .. mac .. " ", 1, true) ~= nil
+		local legacy_match = source_match and (s.remarks or ""):match("^PWC ") ~= nil
+		if s.pwc_binding_id == marker or s[".name"] == binding.acl_id or legacy_match then
+			out[#out + 1] = s
+		end
+	end)
+	return out
+end
+
+local function remove_binding(c, binding)
+	if not binding then return end
+	for _, acl in ipairs(managed_acls_for_binding(c, binding)) do c:delete(PW, acl[".name"]) end
+	if binding.mac then
+		local mac_key = binding.mac:gsub(":", ""):lower()
+		c:delete("dhcp", "pwc_" .. mac_key)
+		os.remove("/tmp/passwall-device-offline/" .. mac_key)
+	end
+	c:delete(CFG, binding[".name"])
+end
+
+local function copy_acl_options(c, source, target)
+	for key, value in pairs(source or {}) do
+		if key:sub(1, 1) ~= "." then
+			if type(value) == "table" then
+				c:delete(PW, target, key)
+				for _, item in ipairs(value) do c:add_list(PW, target, key, item) end
+			else
+				c:set(PW, target, key, value)
+			end
+		end
+	end
+end
+
+local function migrate_acls()
+	local c = uci.cursor()
+	local bindings = {}
+	c:foreach(CFG, "binding", function(s) bindings[#bindings + 1] = s end)
+	local migrated = 0
+	for _, binding in ipairs(bindings) do
+		if (binding.wireless or "") == "" then c:set(CFG, binding[".name"], "wireless", "1") end
+		local matches = managed_acls_for_binding(c, binding)
+		local acl = matches[1]
+		if acl then
+			if not acl[".anonymous"] then
+				local old_name = acl[".name"]
+				local new_name = c:add(PW, "acl_rule")
+				copy_acl_options(c, acl, new_name)
+				c:delete(PW, old_name)
+				acl = c:get_all(PW, new_name)
+				migrated = migrated + 1
+			end
+			c:set(PW, acl[".name"], "pwc_managed", "1")
+			c:set(PW, acl[".name"], "pwc_binding_id", binding[".name"])
+			c:set(CFG, binding[".name"], "acl_id", acl[".name"])
+		end
+	end
+	c:commit(PW)
+	c:commit(CFG)
+	return {ok=true, migrated=migrated, bindings=#bindings}
+end
+
+local function prune_offline()
+	local c = uci.cursor()
+	if c:get(CFG, "global", "enabled") ~= "1" then return {ok=true, removed=0, disabled=true} end
+	local timeout = tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60
+	timeout = math.max(15, math.min(86400, timeout))
+	local wireless, scanned = wifi_clients()
+	if not scanned then return {ok=false, removed=0, error="无法读取无线客户端状态"} end
+	sys.call("mkdir -p /tmp/passwall-device-offline")
+	local now = os.time()
+	local remove = {}
+	local changed = false
+	c:foreach(CFG, "binding", function(binding)
+		local mac = (binding.mac or ""):lower()
+		local timer = "/tmp/passwall-device-offline/" .. mac:gsub(":", "")
+		if wireless[mac] then
+			os.remove(timer)
+			if binding.wireless ~= "1" then c:set(CFG, binding[".name"], "wireless", "1"); changed = true end
+		elseif binding.wireless == "1" then
+			local first_missing = tonumber(trim(read_file(timer) or ""))
+			if not first_missing then
+				local f = io.open(timer, "w")
+				if f then f:write(tostring(now)); f:close() end
+			elseif now - first_missing >= timeout then
+				remove[#remove + 1] = binding
+			end
+		end
+	end)
+	for _, binding in ipairs(remove) do
+		remove_binding(c, binding)
+		sys.call("logger -t passwall-device " .. shellquote("无线设备离线自动解绑 mac=" .. (binding.mac or "unknown")))
+	end
+	if changed or #remove > 0 then c:commit(CFG) end
+	if #remove > 0 then
+		c:commit(PW)
+		c:commit("dhcp")
+		sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
+		sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1 || true")
+		sys.call("/etc/init.d/passwall restart >/tmp/pwc-auto-unbind.log 2>&1")
+		sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1 || true")
+	end
+	return {ok=true, removed=#remove, timeout=timeout}
+end
+
+local function cleanup_acls()
+	local c = uci.cursor()
+	local binding_macs = {}
+	c:foreach(CFG, "binding", function(s)
+		if (s.mac or "") ~= "" then binding_macs[(s.mac or ""):lower()] = true end
+	end)
+	local remove = {}
+	c:foreach(PW, "acl_rule", function(s)
+		if s.pwc_managed == "1" or (s.pwc_binding_id or "") ~= "" then
+			remove[s[".name"]] = true
+			return
+		end
+		local raw_sources = s.sources or ""
+		if type(raw_sources) == "table" then raw_sources = table.concat(raw_sources, " ") end
+		if (s.remarks or ""):match("^PWC ") then
+			for source in tostring(raw_sources):lower():gmatch("%S+") do
+				if binding_macs[source] then remove[s[".name"]] = true end
+			end
+		end
+	end)
+	local count = 0
+	for name in pairs(remove) do c:delete(PW, name); count = count + 1 end
+	c:commit(PW)
+	return {ok=true, removed=count}
+end
+
+local function rate_state(ip, increment)
+	local key=tostring(ip or ""):gsub("[^%w]", "_")
+	local path="/tmp/passwall-device-rate-"..key
+	local now=os.time(); local count, started=(read_file(path) or ""):match("^(%d+):(%d+)$")
+	count=tonumber(count) or 0; started=tonumber(started) or now
+	if now-started>=60 then count=0; started=now end
+	if increment then count=count+1; local f=io.open(path,"w"); if f then f:write(count,":",started); f:close() end end
+	return count>=5 and now-started<60, math.max(0,60-(now-started)), path
+end
+
+local function ensure_dhcp(c, mac, ip, hostname)
+	local id = "pwc_" .. mac:gsub(":", ""):lower()
+	c:set("dhcp", id, "host")
+	c:set("dhcp", id, "name", hostname ~= "未知设备" and hostname or id)
+	c:set("dhcp", id, "mac", mac)
+	c:set("dhcp", id, "ip", ip)
+	return id
+end
+
+local function bind(ip, code)
+	local c = uci.cursor()
+	if c:get(CFG, "global", "enabled") ~= "1" then return {ok=false, error="设备口令服务尚未启用"} end
+	local limited, wait_seconds=rate_state(ip, false)
+	if limited then return {ok=false,error="失败次数过多，请 "..tostring(wait_seconds).." 秒后重试"} end
+	code = trim(code)
+	if code == "" then return {ok=false, error="请输入口令"} end
+	local meta
+	c:foreach(CFG, "node", function(s) if s.code == code then meta = s end end)
+	if not meta then
+		rate_state(ip, true)
+		sys.call("logger -t passwall-device "..shellquote("口令失败 ip="..ip))
+		return {ok=false, error="口令无效"}
+	end
+	local nodes = node_map(c)
+	if not nodes[meta.passwall_id] then return {ok=false, error="口令对应的节点已经不存在"} end
+	local mac = ip_to_mac(ip)
+	if not mac then return {ok=false, error="无法识别当前设备，请关闭随机 MAC 后重试"} end
+	mac = mac:lower()
+	local hostname = hostname_for(c, mac, ip)
+	local old_mac = binding_for_mac(c, mac)
+	local old_node = binding_for_node(c, meta.passwall_id)
+	if old_mac then remove_binding(c, old_mac) end
+	if old_node and (not old_mac or old_node[".name"] ~= old_mac[".name"]) then remove_binding(c, old_node) end
+	local bid = new_section(c, CFG, "binding", "pwc_bind_", {
+		mac=mac, ip=ip, hostname=hostname, node_id=meta.passwall_id, acl_id="",
+		state="pending", wireless="1", bound_at=os.date("%Y-%m-%d %H:%M:%S")
+	})
+	local acl = c:add(PW, "acl_rule")
+	c:set(PW, acl, "enabled", "1")
+	c:set(PW, acl, "remarks", "PWC " .. hostname .. " " .. mac)
+	c:set(PW, acl, "sources", mac .. " " .. ip)
+	c:set(PW, acl, "pwc_managed", "1")
+	c:set(PW, acl, "pwc_binding_id", bid)
+	c:set(PW, acl, "tcp_node", meta.passwall_id)
+	c:set(PW, acl, "udp_node", "tcp")
+	c:set(PW, acl, "tcp_proxy_mode", "proxy")
+	c:set(PW, acl, "udp_proxy_mode", "proxy")
+	c:set(PW, acl, "filter_proxy_ipv6", "1")
+	c:set(PW, acl, "use_global_config", "0")
+	c:set(PW, acl, "use_direct_list", "0")
+	c:set(PW, acl, "use_proxy_list", "0")
+	c:set(PW, acl, "use_block_list", "1")
+	c:set(PW, acl, "use_gfw_list", "0")
+	c:set(PW, acl, "chn_list", "0")
+	c:set(PW, acl, "tcp_redir_ports", "1:65535")
+	c:set(PW, acl, "udp_redir_ports", "1:65535")
+	c:set(PW, "@global[0]", "enabled", "1")
+	c:set(PW, "@global[0]", "acl_enable", "1")
+	c:set(PW, "@global[0]", "client_proxy", "1")
+	ensure_dhcp(c, mac, ip, hostname)
+	c:set(CFG, bid, "acl_id", acl)
+	c:commit(PW); c:commit(CFG); c:commit("dhcp")
+	sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
+	sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
+	local rc = sys.call("/etc/init.d/passwall restart >/tmp/pwc-passwall-apply.log 2>&1")
+	if rc ~= 0 then
+		local rollback = uci.cursor()
+		local b = rollback:get_all(CFG, bid)
+		remove_binding(rollback, b)
+		rollback:commit(PW); rollback:commit(CFG)
+		sys.call("/etc/init.d/passwall restart >/dev/null 2>&1")
+		return {ok=false, error="PassWall 应用失败，设备仍保持断网", details=trim(read_file("/tmp/pwc-passwall-apply.log") or "")}
+	end
+	local active = uci.cursor()
+	active:set(CFG, bid, "state", "active")
+	active:commit(CFG)
+	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
+	local _,_,rate_path=rate_state(ip,false); os.remove(rate_path)
+	sys.call("logger -t passwall-device "..shellquote("绑定成功 mac="..mac.." node="..(nodes[meta.passwall_id].remarks or meta.passwall_id)))
+	return {ok=true, message="绑定成功", node=nodes[meta.passwall_id].remarks or meta.passwall_id, kicked=old_node and old_node.mac or nil}
+end
+
+local function toggle(enabled)
+	local c = uci.cursor()
+	enabled = enabled == "1" and "1" or "0"
+	c:set(CFG, "global", "enabled", enabled)
+	if enabled == "1" then
+		c:set(PW, "@global[0]", "acl_enable", "1")
+	end
+	c:commit(CFG); c:commit(PW)
+	local rc = sys.call("/etc/init.d/passwall-device " .. (enabled == "1" and "restart" or "stop") .. " >/tmp/pwc-toggle.log 2>&1")
+	return rc == 0 and {ok=true, enabled=enabled == "1"} or {ok=false, error=trim(read_file("/tmp/pwc-toggle.log") or "启停失败")}
+end
+
+local function update_node(node_id, remarks, code)
+	if not valid_id(node_id) then return {ok=false, error="节点标识无效"} end
+	remarks = trim(remarks)
+	code = trim(code)
+	if remarks == "" or #remarks > 128 then return {ok=false, error="节点名称不能为空且不能超过 128 个字符"} end
+	if code == "" or #code > 128 then return {ok=false, error="口令不能为空且不能超过 128 个字符"} end
+	local c = uci.cursor()
+	local node = c:get_all(PW, node_id)
+	local meta = metadata_for_node(c, node_id)
+	if not node or node[".type"] ~= "nodes" or not meta then return {ok=false, error="托管节点不存在"} end
+	local duplicate_name, duplicate_code = false, false
+	c:foreach(CFG, "node", function(s)
+		if s[".name"] ~= meta[".name"] and s.remarks == remarks then duplicate_name = true end
+		if s[".name"] ~= meta[".name"] and s.code == code then duplicate_code = true end
+	end)
+	if duplicate_name then return {ok=false, error="节点名称已存在"} end
+	if duplicate_code then return {ok=false, error="口令已被其他节点使用"} end
+	c:set(PW, node_id, "remarks", remarks)
+	c:set(CFG, meta[".name"], "remarks", remarks)
+	c:set(CFG, meta[".name"], "code", code)
+	c:commit(PW)
+	c:commit(CFG)
+	sys.call("logger -t passwall-device " .. shellquote("节点名称或口令已修改 node=" .. node_id))
+	return {ok=true, node_id=node_id, remarks=remarks, code=code}
+end
+
+local function delete_node(node_id, replacement)
+	if not valid_id(node_id) then return {ok=false, error="节点标识无效"} end
+	local c = uci.cursor()
+	local node = c:get_all(PW, node_id)
+	if not node or node[".type"] ~= "nodes" then return {ok=false, error="节点不存在"} end
+	replacement = trim(replacement)
+	local target
+	if replacement ~= "" then
+		target = find_node_by_remark(c, replacement)
+		if not target then return {ok=false, error="没有找到替换节点：" .. replacement} end
+		if target[".name"] == node_id then return {ok=false, error="替换节点不能与待删除节点相同"} end
+	end
+	local affected = {}
+	c:foreach(CFG, "binding", function(s) if s.node_id == node_id then affected[#affected+1] = s end end)
+	if target then
+		local occupied=binding_for_node(c,target[".name"])
+		if occupied and occupied.node_id~=node_id then remove_binding(c,occupied) end
+	end
+	for _, b in ipairs(affected) do
+		if target then
+			c:set(CFG, b[".name"], "node_id", target[".name"])
+			c:set(CFG, b[".name"], "state", "pending")
+			for _, acl in ipairs(managed_acls_for_binding(c, b)) do
+				c:set(PW, acl[".name"], "tcp_node", target[".name"])
+				c:set(PW, acl[".name"], "udp_node", "tcp")
+			end
+		else remove_binding(c, b) end
+	end
+	local meta = metadata_for_node(c, node_id)
+	if meta then c:delete(CFG, meta[".name"]) end
+	c:delete(PW, node_id)
+	c:commit(PW); c:commit(CFG); c:commit("dhcp")
+	sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
+	sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
+	local rc = sys.call("/etc/init.d/passwall restart >/tmp/pwc-passwall-apply.log 2>&1")
+	if target and rc == 0 then
+		local c2=uci.cursor(); c2:foreach(CFG,"binding",function(s) if s.node_id==target[".name"] then c2:set(CFG,s[".name"],"state","active") end end); c2:commit(CFG)
+	end
+	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
+	return {ok=rc == 0, deleted=node.remarks or node_id, moved=#affected, replacement=target and target.remarks or nil, error=rc ~= 0 and "节点已删除，但 PassWall 重载失败；相关设备保持断网" or nil}
+end
+
+local function unbind(binding_id)
+	if not valid_id(binding_id) then return {ok=false,error="绑定标识无效"} end
+	local c=uci.cursor(); local b=c:get_all(CFG,binding_id)
+	if not b or b[".type"]~="binding" then return {ok=false,error="绑定不存在"} end
+	remove_binding(c,b); c:commit(PW); c:commit(CFG); c:commit("dhcp")
+	sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
+	sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
+	sys.call("/etc/init.d/passwall restart >/dev/null 2>&1")
+	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
+	return {ok=true}
+end
+
+local function test_node(node_id)
+	if not valid_id(node_id) then return {ok=false,error="节点标识无效"} end
+	local c=uci.cursor(); local n=c:get_all(PW,node_id)
+	if not n or n[".type"]~="nodes" then return {ok=false,error="节点不存在"} end
+	local pid=nixio.getpid(); local port=30000+(pid%10000)
+	local name="pwc-node-test-"..tostring(pid)..".json"
+	local config="/tmp/etc/passwall/"..name
+	local log="/tmp/pwc-node-test-"..tostring(pid)..".log"
+	local output="/tmp/pwc-node-test-"..tostring(pid)..".out"
+	local pidfile="/tmp/pwc-node-test-"..tostring(pid)..".pid"
+	sys.call("mkdir -p /tmp/etc/passwall")
+	sys.call("/usr/share/passwall/app.sh run_socks flag=pwc_node_test node="..shellquote(node_id).." bind=127.0.0.1 socks_port="..tostring(port).." config_file="..shellquote(name).." no_run=1 >/dev/null 2>&1 || true")
+	if not read_file(config) then return {ok=false,reachable=false,error="PassWall 无法生成该节点的测试配置"} end
+	local node_type=(n.type or "Xray"):lower()
+	local binary, args="/usr/bin/xray", "run -config"
+	if node_type=="sing-box" then binary="/usr/bin/sing-box"; args="run -c" end
+	if sys.call("test -x "..shellquote(binary))~=0 then os.remove(config); return {ok=false,reachable=false,error="缺少节点所需代理核心"} end
+	local started=os.time()
+	sys.call("("..shellquote(binary).." "..args.." "..shellquote(config).." >"..shellquote(log).." 2>&1 & echo $! >"..shellquote(pidfile)..")")
+	sys.call("sleep 1")
+	local rc=sys.call("curl --proxy socks5h://127.0.0.1:"..tostring(port).." --connect-timeout 3 --max-time 8 -fsS https://api.ipify.org -o "..shellquote(output).." 2>/dev/null")
+	local child=trim(read_file(pidfile) or "")
+	if child:match("^%d+$") then sys.call("kill "..child.." >/dev/null 2>&1 || true") end
+	local exit_ip=trim(read_file(output) or "")
+	local details=trim(read_file(log) or "")
+	os.remove(config); os.remove(log); os.remove(output); os.remove(pidfile)
+	if rc==0 and exit_ip~="" then return {ok=true,reachable=true,exit_ip=exit_ip,elapsed_seconds=os.time()-started,message="代理可用，出口 IP："..exit_ip} end
+	return {ok=false,reachable=false,error="代理测试失败，节点将保持断网",details=details}
+end
+
+local action=arg[1] or "status"
+if action=="status" then reply(list_status())
+elseif action=="extract" then local links, ignored=extract_links(read_file(arg[2]) or ""); reply({ok=true,links=links,ignored=ignored})
+elseif action=="import" then reply(import_nodes(arg[2],arg[3],arg[4],arg[5],arg[6],arg[7]))
+elseif action=="bind" then reply(bind(arg[2] or "",arg[3] or ""))
+elseif action=="toggle" then reply(toggle(arg[2]))
+elseif action=="delete-node" then reply(delete_node(arg[2] or "",arg[3] or ""))
+elseif action=="unbind" then reply(unbind(arg[2] or ""))
+elseif action=="test-node" then reply(test_node(arg[2] or ""))
+elseif action=="update-node" then reply(update_node(arg[2] or "",arg[3] or "",arg[4] or ""))
+elseif action=="migrate" then reply(migrate_acls())
+elseif action=="prune-offline" then reply(prune_offline())
+elseif action=="cleanup-acls" then reply(cleanup_acls())
+else reply({ok=false,error="未知操作"}) end

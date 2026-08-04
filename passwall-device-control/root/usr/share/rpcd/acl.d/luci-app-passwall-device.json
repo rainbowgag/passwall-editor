@@ -1,0 +1,7 @@
+{
+	"luci-app-passwall-device": {
+		"description": "管理 PassWall 设备口令",
+		"read": { "uci": [ "passwall", "passwall_device", "dhcp" ] },
+		"write": { "uci": [ "passwall", "passwall_device", "dhcp", "firewall" ] }
+	}
+}
