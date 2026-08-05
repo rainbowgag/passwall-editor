@@ -1,7 +1,7 @@
 {
-  "version": "0.4.0",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.0_all.ipk",
-  "sha256": "3341f10b5d0ca234788725deda7d750aff328394bf372eb6d23acd7de89bbdbc",
+  "version": "0.4.1",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.1_all.ipk",
+  "sha256": "521bea8e0387d9dc17fa25141ad60ca4b0c6f75511df697b5b4e5c21b747ff0e",
   "published_at": "2026-08-05",
-  "notes": "支持一节点多口令、一口令一设备抢占、批量追加顺序口令、节点与设备快速搜索，并默认永久保留离线绑定。"
+  "notes": "修复手机提交口令时登录接口被入口页面截获、返回 HTML 导致请求失败的问题。"
 }

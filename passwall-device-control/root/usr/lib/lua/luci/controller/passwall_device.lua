@@ -52,7 +52,7 @@ function index()
 	local portal = entry({"pwc"}, template("passwall_device/portal"))
 	portal.sysauth = false
 	portal.dependent = false
-	portal.leaf = true
+	portal.leaf = false
 	local login = entry({"pwc", "login"}, call("portal_login"))
 	login.sysauth = false
 	login.dependent = false
