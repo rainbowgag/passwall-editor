@@ -40,13 +40,13 @@ opkg install luci-app-passwall-device_0.4.2_all.ipk
 GitHub 一键安装或升级：
 
 ```sh
-curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.4.2_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "1992061c94e90ef14c75911eaa674bf186c79e1173f31fa7fa3c0b2c59059a0a" ] && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.4.2_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "1992061c94e90ef14c75911eaa674bf186c79e1173f31fa7fa3c0b2c59059a0a" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 VPS 一键安装或升级：
 
 ```sh
-wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.4.2_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "1992061c94e90ef14c75911eaa674bf186c79e1173f31fa7fa3c0b2c59059a0a" ] && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.4.2_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "1992061c94e90ef14c75911eaa674bf186c79e1173f31fa7fa3c0b2c59059a0a" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 在 OpenWrt/Linux 环境构建该固件兼容的 IPK：
