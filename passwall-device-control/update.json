@@ -1,7 +1,7 @@
 {
-  "version": "0.4.3",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.3_all.ipk",
-  "sha256": "544bdd20eca7e88857103b639ec444cd727af40d80f07ba1a42752023036fd45",
+  "version": "0.4.4",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.4_all.ipk",
+  "sha256": "5c7be159d35c5d1042de5fc783cae0609832ea19295a7ae14325ab294267c023",
   "published_at": "2026-08-05",
-  "notes": "修复批量导入后节点与口令关系被随机打乱的问题；节点严格按 PassWall 原始导入顺序依次分配口令。"
+  "notes": "VLESS Reality 节点在 sing-box 可用时自动使用 sing-box 核心，修复部分节点在 Xray 握手失败但其他客户端可正常使用的问题。"
 }

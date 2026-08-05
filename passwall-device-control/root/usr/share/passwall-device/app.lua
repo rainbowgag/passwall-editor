@@ -237,7 +237,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.3"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.4"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -378,11 +378,19 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 	code_width = math.min(12, math.max(1, tonumber(code_width) or 3))
 	code_count = math.min(100, math.max(1, tonumber(code_count) or 1))
 	local results, node_ids = {}, {}
+	local has_sing_box = sys.call("test -x /usr/bin/sing-box") == 0
 	for i, n in ipairs(added) do
 		local remark = n.remarks or n[".name"]
 		if trim(prefix) ~= "" then remark = trim(prefix) .. tostring(start_number + i - 1) end
 		if find_node_by_remark(c, remark) and (find_node_by_remark(c, remark)[".name"] ~= n[".name"]) then
 			remark = remark .. "-" .. tostring(i)
+		end
+		-- Some REALITY servers accept the same link through sing-box but reject
+		-- Xray's handshake. Prefer sing-box for imported VLESS REALITY nodes when
+		-- that core is available, so health checks and ACL traffic use it.
+		if has_sing_box and n.protocol == "vless" and n.reality == "1" then
+			c:set(PW, n[".name"], "type", "sing-box")
+			n.type = "sing-box"
 		end
 		c:set(PW, n[".name"], "remarks", remark)
 		new_section(c, CFG, "node", "pwc_meta_", {passwall_id=n[".name"], remarks=remark, created_at=os.date("%Y-%m-%d %H:%M:%S")})
