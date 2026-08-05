@@ -91,12 +91,22 @@ local function metadata_for_node(c, node_id)
 	return found
 end
 
+local function code_value_less(a, b)
+	a, b = tostring(a or ""), tostring(b or "")
+	local an, bn = tonumber(a), tonumber(b)
+	if an and bn and an ~= bn then return an < bn end
+	return a < b
+end
+
 local function codes_for_node(c, node_id)
 	local found = {}
 	c:foreach(CFG, "code", function(s)
 		if s.node_id == node_id then found[#found + 1] = s end
 	end)
-	table.sort(found, function(a, b) return (a.created_at or a[".name"]) < (b.created_at or b[".name"]) end)
+	table.sort(found, function(a, b)
+		if a.value ~= b.value then return code_value_less(a.value, b.value) end
+		return (a.created_at or a[".name"]) < (b.created_at or b[".name"])
+	end)
 	return found
 end
 
@@ -204,11 +214,22 @@ local function list_status()
 				id=s.passwall_id, meta_id=s[".name"], remarks=p.remarks or s.remarks or s.passwall_id,
 				protocol=p.protocol or "", type=p.type or "", address=p.address or "", port=p.port or "",
 				codes=code_items, code_count=#code_items, bound=#group > 0, device_count=#group, online_count=online_count,
+				last_test_at=s.last_test_at or "", last_reachable=s.last_reachable or "",
+				last_exit_ip=s.last_exit_ip or "", last_test_message=s.last_test_message or "",
 				devices=names, online=online_count > 0, state=#group > 0 and "active" or "free"
 			}
 		end
 	end)
-	table.sort(nodes, function(a,b) return a.remarks < b.remarks end)
+	table.sort(nodes, function(a,b)
+		local ac = a.codes[1] and a.codes[1].value or ""
+		local bc = b.codes[1] and b.codes[1].value or ""
+		if ac ~= bc then
+			if ac == "" then return false end
+			if bc == "" then return true end
+			return code_value_less(ac, bc)
+		end
+		return a.remarks < b.remarks
+	end)
 	table.sort(bindings, function(a,b) return a.bound_at > b.bound_at end)
 	return {
 		ok=true,
@@ -216,7 +237,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.1"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.2"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -855,6 +876,20 @@ local function unbind_many(id_text)
 	return {ok=rc == 0, removed=#bindings, error=rc ~= 0 and "设备已解绑，但 PassWall 重载失败" or nil}
 end
 
+local function record_node_test(node_id, result)
+	local c = uci.cursor()
+	local meta = metadata_for_node(c, node_id)
+	if meta then
+		c:set(CFG, meta[".name"], "last_test_at", os.date("%Y-%m-%d %H:%M:%S"))
+		c:set(CFG, meta[".name"], "last_reachable", result.reachable and "1" or "0")
+		if trim(result.exit_ip) ~= "" then c:set(CFG, meta[".name"], "last_exit_ip", result.exit_ip)
+		else c:delete(CFG, meta[".name"], "last_exit_ip") end
+		c:set(CFG, meta[".name"], "last_test_message", result.message or result.error or "")
+		c:commit(CFG)
+	end
+	return result
+end
+
 local function test_node(node_id)
 	if not valid_id(node_id) then return {ok=false,error="节点标识无效"} end
 	local c=uci.cursor(); local n=c:get_all(PW,node_id)
@@ -867,11 +902,11 @@ local function test_node(node_id)
 	local pidfile="/tmp/pwc-node-test-"..tostring(pid)..".pid"
 	sys.call("mkdir -p /tmp/etc/passwall")
 	sys.call("/usr/share/passwall/app.sh run_socks flag=pwc_node_test node="..shellquote(node_id).." bind=127.0.0.1 socks_port="..tostring(port).." config_file="..shellquote(name).." no_run=1 >/dev/null 2>&1 || true")
-	if not read_file(config) then return {ok=false,reachable=false,error="PassWall 无法生成该节点的测试配置"} end
+	if not read_file(config) then return record_node_test(node_id, {ok=false,reachable=false,error="PassWall 无法生成该节点的测试配置"}) end
 	local node_type=(n.type or "Xray"):lower()
 	local binary, args="/usr/bin/xray", "run -config"
 	if node_type=="sing-box" then binary="/usr/bin/sing-box"; args="run -c" end
-	if sys.call("test -x "..shellquote(binary))~=0 then os.remove(config); return {ok=false,reachable=false,error="缺少节点所需代理核心"} end
+	if sys.call("test -x "..shellquote(binary))~=0 then os.remove(config); return record_node_test(node_id, {ok=false,reachable=false,error="缺少节点所需代理核心"}) end
 	local started=os.time()
 	sys.call("("..shellquote(binary).." "..args.." "..shellquote(config).." >"..shellquote(log).." 2>&1 & echo $! >"..shellquote(pidfile)..")")
 	sys.call("sleep 1")
@@ -881,8 +916,8 @@ local function test_node(node_id)
 	local exit_ip=trim(read_file(output) or "")
 	local details=trim(read_file(log) or "")
 	os.remove(config); os.remove(log); os.remove(output); os.remove(pidfile)
-	if rc==0 and exit_ip~="" then return {ok=true,reachable=true,exit_ip=exit_ip,elapsed_seconds=os.time()-started,message="代理可用，出口 IP："..exit_ip} end
-	return {ok=false,reachable=false,error="代理测试失败，节点将保持断网",details=details}
+	if rc==0 and exit_ip~="" then return record_node_test(node_id, {ok=true,reachable=true,exit_ip=exit_ip,elapsed_seconds=os.time()-started,message="代理可用，出口 IP："..exit_ip}) end
+	return record_node_test(node_id, {ok=false,reachable=false,error="代理测试失败，节点将保持断网",details=details})
 end
 
 local UPDATE_MANIFESTS = {

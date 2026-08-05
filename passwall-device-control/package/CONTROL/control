@@ -1,5 +1,5 @@
 Package: luci-app-passwall-device
-Version: 0.4.1
+Version: 0.4.2
 Architecture: all
 Maintainer: local
 Depends: luci-compat, luci-lua-runtime, luci-app-passwall, firewall4, nftables, curl, xray-core

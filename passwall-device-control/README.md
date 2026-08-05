@@ -32,7 +32,7 @@ chmod +x install.sh
 或者直接安装已构建的包：
 
 ```sh
-opkg install luci-app-passwall-device_0.4.1_all.ipk
+opkg install luci-app-passwall-device_0.4.2_all.ipk
 ```
 
 安装后认证服务保持关闭。先进入“服务 → PassWall 设备口令”导入并检查节点，再启用认证服务。
@@ -40,13 +40,13 @@ opkg install luci-app-passwall-device_0.4.1_all.ipk
 GitHub 一键安装或升级：
 
 ```sh
-curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.4.1_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "521bea8e0387d9dc17fa25141ad60ca4b0c6f75511df697b5b4e5c21b747ff0e" ] && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.4.2_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "1992061c94e90ef14c75911eaa674bf186c79e1173f31fa7fa3c0b2c59059a0a" ] && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 VPS 一键安装或升级：
 
 ```sh
-wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.4.1_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "521bea8e0387d9dc17fa25141ad60ca4b0c6f75511df697b5b4e5c21b747ff0e" ] && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.4.2_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "1992061c94e90ef14c75911eaa674bf186c79e1173f31fa7fa3c0b2c59059a0a" ] && opkg install /tmp/passwall-device.ipk && /etc/init.d/passwall restart && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 在 OpenWrt/Linux 环境构建该固件兼容的 IPK：

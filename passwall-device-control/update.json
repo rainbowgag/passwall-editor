@@ -1,7 +1,7 @@
 {
-  "version": "0.4.1",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.1_all.ipk",
-  "sha256": "521bea8e0387d9dc17fa25141ad60ca4b0c6f75511df697b5b4e5c21b747ff0e",
+  "version": "0.4.2",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.2_all.ipk",
+  "sha256": "1992061c94e90ef14c75911eaa674bf186c79e1173f31fa7fa3c0b2c59059a0a",
   "published_at": "2026-08-05",
-  "notes": "修复手机提交口令时登录接口被入口页面截获、返回 HTML 导致请求失败的问题。"
+  "notes": "修复手机口令登录路由；口令按数值升序排列；新增单节点和所选节点批量连通性检测，并保存检测状态、出口 IP 与时间。"
 }
