@@ -237,7 +237,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.5"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.6"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -246,7 +246,7 @@ end
 
 local function extract_links(text)
 	local links, errors, seen = {}, {}, {}
-	local accepted = {vmess=true, vless=true, ["trojan-go"]=true, socks=true, socks5=true}
+	local accepted = {vmess=true, vless=true, trojan=true, ["trojan-go"]=true, ss=true, socks=true, socks5=true}
 	local function add(value)
 		value = trim(value):gsub("[,;%)%]，；。]+$", "")
 		if value ~= "" and not seen[value] then seen[value] = true; links[#links+1] = value end
@@ -337,7 +337,7 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 	local text = read_file(path)
 	if not text then return {ok=false, error="无法读取导入内容"} end
 	local links, ignored = extract_links(text)
-	if #links == 0 then return {ok=false, error="没有找到 VMess、VLESS、Trojan-Go 或 SOCKS 节点"} end
+	if #links == 0 then return {ok=false, error="没有找到 VMess、VLESS、Trojan、Trojan-Go、SS 或 SOCKS 节点"} end
 	local before = node_map(uci.cursor())
 	local official = {}
 	local socks_cursor = uci.cursor()

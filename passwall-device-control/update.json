@@ -1,7 +1,7 @@
 {
-  "version": "0.4.5",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.5_all.ipk",
-  "sha256": "7d6f6f4025cdf84d90b221d6fba6f3012efaa99565de59e596a7afc1edf090e5",
+  "version": "0.4.6",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.6_all.ipk",
+  "sha256": "d7fb7908b1d1415d0dde3128d35457b7293007a5affb0d5eae0c88ffee12b321",
   "published_at": "2026-08-06",
-  "notes": "新增 Trojan-Go 链接批量导入支持，完整保留 TLS 与 WebSocket 参数，并自动使用 sing-box 核心。"
+  "notes": "新增标准 Trojan 与 Shadowsocks 链接批量导入支持；SS 兼容 SIP002 和旧式 Base64 格式，Trojan 自动使用 sing-box。"
 }
