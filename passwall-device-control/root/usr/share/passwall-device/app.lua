@@ -237,7 +237,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.2"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.3"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -363,10 +363,13 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 		os.execute("lua /usr/share/passwall/subscribe.lua add pwc >/tmp/pwc-import.log 2>&1")
 	end
 	local c = uci.cursor()
-	local after = node_map(c)
 	local added = {}
-	for id, n in pairs(after) do if not before[id] then added[#added+1] = n end end
-	table.sort(added, function(a,b) return a[".name"] < b[".name"] end)
+	-- UCI foreach preserves the order written by PassWall's importer. The
+	-- generated section names are random, so sorting by .name would scramble
+	-- the node-to-code relationship even though codes look sequential.
+	c:foreach(PW, "nodes", function(n)
+		if not before[n[".name"]] then added[#added + 1] = n end
+	end)
 	if #added == 0 then
 		return {ok=false, error="PassWall 未添加节点，可能全部重复或格式不受支持", details=trim(read_file("/tmp/pwc-import.log") or "")}
 	end

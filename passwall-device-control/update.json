@@ -1,7 +1,7 @@
 {
-  "version": "0.4.2",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.2_all.ipk",
-  "sha256": "1992061c94e90ef14c75911eaa674bf186c79e1173f31fa7fa3c0b2c59059a0a",
+  "version": "0.4.3",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.3_all.ipk",
+  "sha256": "544bdd20eca7e88857103b639ec444cd727af40d80f07ba1a42752023036fd45",
   "published_at": "2026-08-05",
-  "notes": "修复手机口令登录路由；口令按数值升序排列；新增单节点和所选节点批量连通性检测，并保存检测状态、出口 IP 与时间。"
+  "notes": "修复批量导入后节点与口令关系被随机打乱的问题；节点严格按 PassWall 原始导入顺序依次分配口令。"
 }
