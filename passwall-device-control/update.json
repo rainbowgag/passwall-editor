@@ -1,7 +1,7 @@
 {
-  "version": "0.4.4",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.4_all.ipk",
-  "sha256": "5c7be159d35c5d1042de5fc783cae0609832ea19295a7ae14325ab294267c023",
-  "published_at": "2026-08-05",
-  "notes": "VLESS Reality 节点在 sing-box 可用时自动使用 sing-box 核心，修复部分节点在 Xray 握手失败但其他客户端可正常使用的问题。"
+  "version": "0.4.5",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.5_all.ipk",
+  "sha256": "7d6f6f4025cdf84d90b221d6fba6f3012efaa99565de59e596a7afc1edf090e5",
+  "published_at": "2026-08-06",
+  "notes": "新增 Trojan-Go 链接批量导入支持，完整保留 TLS 与 WebSocket 参数，并自动使用 sing-box 核心。"
 }

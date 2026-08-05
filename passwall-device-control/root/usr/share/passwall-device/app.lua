@@ -237,7 +237,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.4"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.5"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -246,7 +246,7 @@ end
 
 local function extract_links(text)
 	local links, errors, seen = {}, {}, {}
-	local accepted = {vmess=true, vless=true, socks=true, socks5=true}
+	local accepted = {vmess=true, vless=true, ["trojan-go"]=true, socks=true, socks5=true}
 	local function add(value)
 		value = trim(value):gsub("[,;%)%]，；。]+$", "")
 		if value ~= "" and not seen[value] then seen[value] = true; links[#links+1] = value end
@@ -337,7 +337,7 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 	local text = read_file(path)
 	if not text then return {ok=false, error="无法读取导入内容"} end
 	local links, ignored = extract_links(text)
-	if #links == 0 then return {ok=false, error="没有找到 VMess、VLESS 或 SOCKS 节点"} end
+	if #links == 0 then return {ok=false, error="没有找到 VMess、VLESS、Trojan-Go 或 SOCKS 节点"} end
 	local before = node_map(uci.cursor())
 	local official = {}
 	local socks_cursor = uci.cursor()
@@ -350,7 +350,10 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 				username=socks.username, password=socks.password
 			})
 		else
-			official[#official+1] = link
+			-- PassWall parses Trojan links but does not recognize the historical
+			-- trojan-go scheme. Normalize only the scheme and preserve the WS/TLS
+			-- query parameters for its official parser.
+			official[#official+1] = link:gsub("^trojan%-go://", "trojan://", 1)
 		end
 	end
 	socks_cursor:commit(PW)
@@ -388,9 +391,14 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 		-- Some REALITY servers accept the same link through sing-box but reject
 		-- Xray's handshake. Prefer sing-box for imported VLESS REALITY nodes when
 		-- that core is available, so health checks and ACL traffic use it.
-		if has_sing_box and n.protocol == "vless" and n.reality == "1" then
+		local is_trojan = n.protocol == "trojan" or n.type == "Trojan-Plus"
+		if has_sing_box and ((n.protocol == "vless" and n.reality == "1") or is_trojan) then
 			c:set(PW, n[".name"], "type", "sing-box")
 			n.type = "sing-box"
+			if is_trojan then
+				c:set(PW, n[".name"], "protocol", "trojan")
+				n.protocol = "trojan"
+			end
 		end
 		c:set(PW, n[".name"], "remarks", remark)
 		new_section(c, CFG, "node", "pwc_meta_", {passwall_id=n[".name"], remarks=remark, created_at=os.date("%Y-%m-%d %H:%M:%S")})

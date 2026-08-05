@@ -4,7 +4,8 @@
 
 ## 功能
 
-- 混杂文本批量提取 VMess、VLESS、SOCKS/SOCKS5 节点。
+- 混杂文本批量提取 VMess、VLESS、Trojan-Go、SOCKS/SOCKS5 节点。
+- Trojan-Go 链接保留 TLS、WebSocket、Host 与路径参数，并自动使用 sing-box 核心。
 - 支持 `IP:端口:用户名:密码` 和 `IP:端口` SOCKS 简写。
 - 使用 PassWall 官方订阅解析器写入节点，降低协议兼容风险。
 - 批量命名、连续口令，并可设置每个导入节点生成的口令数量。
@@ -32,7 +33,7 @@ chmod +x install.sh
 或者直接安装已构建的包：
 
 ```sh
-opkg install luci-app-passwall-device_0.4.4_all.ipk
+opkg install luci-app-passwall-device_0.4.5_all.ipk
 ```
 
 安装后认证服务保持关闭。先进入“服务 → PassWall 设备口令”导入并检查节点，再启用认证服务。
@@ -40,13 +41,13 @@ opkg install luci-app-passwall-device_0.4.4_all.ipk
 GitHub 一键安装或升级：
 
 ```sh
-curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.4.4_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "5c7be159d35c5d1042de5fc783cae0609832ea19295a7ae14325ab294267c023" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+{ [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.4.5_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "7d6f6f4025cdf84d90b221d6fba6f3012efaa99565de59e596a7afc1edf090e5" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 VPS 一键安装或升级：
 
 ```sh
-wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.4.4_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "5c7be159d35c5d1042de5fc783cae0609832ea19295a7ae14325ab294267c023" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+{ [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.4.5_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "7d6f6f4025cdf84d90b221d6fba6f3012efaa99565de59e596a7afc1edf090e5" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 在 OpenWrt/Linux 环境构建该固件兼容的 IPK：
