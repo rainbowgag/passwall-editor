@@ -42,6 +42,9 @@ function index()
 	entry({"admin", "services", "passwall_device", "api", "unbind-many"}, call("api_unbind_many")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "test"}, call("api_test")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "edit"}, call("api_edit")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "edit-code"}, call("api_edit_code")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "add-codes"}, call("api_add_codes")).leaf = true
+	entry({"admin", "services", "passwall_device", "api", "delete-codes"}, call("api_delete_codes")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "edit-binding"}, call("api_edit_binding")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "version"}, call("api_version")).leaf = true
 	entry({"admin", "services", "passwall_device", "api", "update"}, call("api_update")).leaf = true
@@ -65,13 +68,14 @@ function api_import()
 	local code_prefix = http.formvalue("code_prefix") or ""
 	local code_start = http.formvalue("code_start") or "1"
 	local code_width = http.formvalue("code_width") or "3"
+	local code_count = http.formvalue("code_count") or "1"
 	if #links > 524288 then return json({ok=false, error="导入内容不能超过 512KB"}) end
 	local path = "/tmp/pwc-import-" .. tostring(nixio.getpid()) .. ".txt"
 	local f = io.open(path, "w")
 	if not f then return json({ok=false, error="无法创建导入临时文件"}) end
 	f:write(links)
 	f:close()
-	local result = run("import", {path, prefix, start, code_prefix, code_start, code_width})
+	local result = run("import", {path, prefix, start, code_prefix, code_start, code_width, code_count})
 	os.remove(path)
 	json(result)
 end
@@ -91,6 +95,9 @@ function api_unbind_many()
 end
 function api_test() json(run("test-node", {http.formvalue("node_id") or ""})) end
 function api_edit() json(run("update-node", {http.formvalue("node_id") or "", http.formvalue("remarks") or "", http.formvalue("code") or ""})) end
+function api_edit_code() json(run("update-code", {http.formvalue("code_id") or "", http.formvalue("value") or ""})) end
+function api_add_codes() json(run("add-codes", {http.formvalue("node_ids") or "", http.formvalue("count") or "1"})) end
+function api_delete_codes() json(run("delete-codes", {http.formvalue("code_ids") or ""})) end
 function api_edit_binding() json(run("update-binding", {http.formvalue("binding_id") or "", http.formvalue("remark") or ""})) end
 function api_version() json(run("check-update")) end
 function api_update() json(run("install-update")) end

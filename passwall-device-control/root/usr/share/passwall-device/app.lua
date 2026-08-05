@@ -91,6 +91,21 @@ local function metadata_for_node(c, node_id)
 	return found
 end
 
+local function codes_for_node(c, node_id)
+	local found = {}
+	c:foreach(CFG, "code", function(s)
+		if s.node_id == node_id then found[#found + 1] = s end
+	end)
+	table.sort(found, function(a, b) return (a.created_at or a[".name"]) < (b.created_at or b[".name"]) end)
+	return found
+end
+
+local function code_by_value(c, value)
+	local found
+	c:foreach(CFG, "code", function(s) if s.value == value then found = s end end)
+	return found
+end
+
 local function binding_for_mac(c, mac)
 	local found
 	c:foreach(CFG, "binding", function(s)
@@ -103,6 +118,14 @@ local function bindings_for_node(c, node_id)
 	local found = {}
 	c:foreach(CFG, "binding", function(s)
 		if s.node_id == node_id then found[#found + 1] = s end
+	end)
+	return found
+end
+
+local function binding_for_code(c, code_id)
+	local found
+	c:foreach(CFG, "binding", function(s)
+		if s.code_id == code_id then found = s end
 	end)
 	return found
 end
@@ -151,7 +174,8 @@ local function list_status()
 		local item = {
 			id=s[".name"], mac=s.mac or "", ip=s.ip or "", hostname=display_name,
 			system_hostname=s.hostname or "", remark=s.remark or "",
-			node_id=s.node_id or "", node=p and (p.remarks or s.node_id) or "节点已删除",
+			node_id=s.node_id or "", code_id=s.code_id or "", code=s.code or "",
+			node=p and (p.remarks or s.node_id) or "节点已删除",
 			state=s.state or "active", bound_at=s.bound_at or "", online=online
 		}
 		bindings[#bindings + 1] = item
@@ -167,10 +191,19 @@ local function list_status()
 				if b.online then online_count = online_count + 1 end
 				names[#names + 1] = b.hostname
 			end
+			local code_items = {}
+			for _, code in ipairs(codes_for_node(c, s.passwall_id)) do
+				local binding = binding_for_code(c, code[".name"])
+				code_items[#code_items + 1] = {
+					id=code[".name"], value=code.value or "", bound=binding ~= nil,
+					device=binding and (trim(binding.remark) ~= "" and binding.remark or binding.hostname or binding.mac) or "",
+					online=binding and wireless[(binding.mac or ""):lower()] == true or false
+				}
+			end
 			nodes[#nodes + 1] = {
 				id=s.passwall_id, meta_id=s[".name"], remarks=p.remarks or s.remarks or s.passwall_id,
 				protocol=p.protocol or "", type=p.type or "", address=p.address or "", port=p.port or "",
-				code=s.code or "", bound=#group > 0, device_count=#group, online_count=online_count,
+				codes=code_items, code_count=#code_items, bound=#group > 0, device_count=#group, online_count=online_count,
 				devices=names, online=online_count > 0, state=#group > 0 and "active" or "free"
 			}
 		end
@@ -183,7 +216,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.3.0"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.0"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -247,7 +280,39 @@ local function parse_socks_link(link)
 	}
 end
 
-local function import_nodes(path, prefix, start_number, code_prefix, code_start, code_width)
+local function code_in_use(c, value)
+	if code_by_value(c, value) then return true end
+	local used = false
+	c:foreach(CFG, "node", function(s) if s.code == value then used = true end end)
+	return used
+end
+
+local function create_codes(c, node_ids, code_prefix, code_start, code_width, count_each)
+	code_prefix = tostring(code_prefix or "")
+	local number = math.max(0, tonumber(code_start) or 1)
+	local width = math.min(12, math.max(1, tonumber(code_width) or 3))
+	local count = math.min(100, math.max(1, tonumber(count_each) or 1))
+	local created = {}
+	for _, node_id in ipairs(node_ids) do
+		for _ = 1, count do
+			local value
+			repeat
+				value = code_prefix .. string.format("%0" .. tostring(width) .. "d", number)
+				number = number + 1
+			until not code_in_use(c, value)
+			local id = new_section(c, CFG, "code", "pwc_code_", {
+				node_id=node_id, value=value, created_at=os.date("%Y-%m-%d %H:%M:%S") .. string.format(".%06d", #created + 1)
+			})
+			created[#created + 1] = {id=id, node_id=node_id, value=value}
+		end
+	end
+	c:set(CFG, "global", "code_prefix", code_prefix)
+	c:set(CFG, "global", "code_width", tostring(width))
+	c:set(CFG, "global", "next_code_number", tostring(number))
+	return created, number
+end
+
+local function import_nodes(path, prefix, start_number, code_prefix, code_start, code_width, code_count)
 	local text = read_file(path)
 	if not text then return {ok=false, error="无法读取导入内容"} end
 	local links, ignored = extract_links(text)
@@ -287,7 +352,8 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 	start_number = math.max(0, tonumber(start_number) or 1)
 	code_start = math.max(0, tonumber(code_start) or 1)
 	code_width = math.min(12, math.max(1, tonumber(code_width) or 3))
-	local results = {}
+	code_count = math.min(100, math.max(1, tonumber(code_count) or 1))
+	local results, node_ids = {}, {}
 	for i, n in ipairs(added) do
 		local remark = n.remarks or n[".name"]
 		if trim(prefix) ~= "" then remark = trim(prefix) .. tostring(start_number + i - 1) end
@@ -295,19 +361,20 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 			remark = remark .. "-" .. tostring(i)
 		end
 		c:set(PW, n[".name"], "remarks", remark)
-		local code = tostring(code_prefix or "") .. string.format("%0" .. tostring(code_width) .. "d", code_start + i - 1)
-		local collision = true
-		while collision do
-			collision = false
-			c:foreach(CFG, "node", function(s) if s.code == code then collision = true end end)
-			if collision then code_start = code_start + 1; code = tostring(code_prefix or "") .. string.format("%0" .. tostring(code_width) .. "d", code_start + i - 1) end
-		end
-		new_section(c, CFG, "node", "pwc_meta_", {passwall_id=n[".name"], remarks=remark, code=code, created_at=os.date("%Y-%m-%d %H:%M:%S")})
-		results[#results+1] = {id=n[".name"], remarks=remark, code=code, protocol=n.protocol or ""}
+		new_section(c, CFG, "node", "pwc_meta_", {passwall_id=n[".name"], remarks=remark, created_at=os.date("%Y-%m-%d %H:%M:%S")})
+		node_ids[#node_ids + 1] = n[".name"]
+		results[#results+1] = {id=n[".name"], remarks=remark, protocol=n.protocol or "", codes={}}
 	end
+	local created = create_codes(c, node_ids, code_prefix, code_start, code_width, code_count)
+	local by_node = {}
+	for _, item in ipairs(created) do
+		by_node[item.node_id] = by_node[item.node_id] or {}
+		by_node[item.node_id][#by_node[item.node_id] + 1] = item.value
+	end
+	for _, result in ipairs(results) do result.codes = by_node[result.id] or {} end
 	c:commit(PW)
 	c:commit(CFG)
-	return {ok=true, imported=#results, extracted=#links, ignored=#ignored, nodes=results, warnings=ignored}
+	return {ok=true, imported=#results, codes_created=#created, extracted=#links, ignored=#ignored, nodes=results, warnings=ignored}
 end
 
 local function ip_to_mac(ip)
@@ -368,8 +435,54 @@ local function copy_acl_options(c, source, target)
 	end
 end
 
+local function migrate_codes(c)
+	local created, assigned = 0, 0
+	local metas = {}
+	c:foreach(CFG, "node", function(s) metas[#metas + 1] = s end)
+	for _, meta in ipairs(metas) do
+		local existing = codes_for_node(c, meta.passwall_id)
+		local legacy = trim(meta.code)
+		if #existing == 0 and legacy ~= "" then
+			new_section(c, CFG, "code", "pwc_code_", {
+				node_id=meta.passwall_id, value=legacy, created_at=meta.created_at or os.date("%Y-%m-%d %H:%M:%S")
+			})
+			created = created + 1
+		end
+		if legacy ~= "" then c:delete(CFG, meta[".name"], "code") end
+	end
+	local used = {}
+	local bindings = {}
+	c:foreach(CFG, "binding", function(s) bindings[#bindings + 1] = s end)
+	table.sort(bindings, function(a, b) return (a.bound_at or "") > (b.bound_at or "") end)
+	for _, binding in ipairs(bindings) do
+		local code_id = binding.code_id
+		if not valid_id(code_id or "") or not c:get(CFG, code_id, "value") or used[code_id] then code_id = nil end
+		if not code_id then
+			for _, code in ipairs(codes_for_node(c, binding.node_id)) do
+				if not used[code[".name"]] then code_id = code[".name"]; break end
+			end
+			if not code_id then
+				local prefix = c:get(CFG, "global", "code_prefix") or ""
+				local width = tonumber((c:get(CFG, "global", "code_width"))) or 3
+				local next_number = tonumber((c:get(CFG, "global", "next_code_number"))) or 1
+				local generated = create_codes(c, {binding.node_id}, prefix, next_number, width, 1)
+				code_id = generated[1].id
+				created = created + 1
+			end
+			c:set(CFG, binding[".name"], "code_id", code_id)
+			c:set(CFG, binding[".name"], "code", c:get(CFG, code_id, "value") or "")
+			assigned = assigned + 1
+		end
+		used[code_id] = true
+	end
+	c:set(CFG, "global", "offline_unbind_seconds", "0")
+	sys.call("rm -rf /tmp/passwall-device-offline")
+	return created, assigned
+end
+
 local function migrate_acls()
 	local c = uci.cursor()
+	local codes_created, codes_assigned = migrate_codes(c)
 	local bindings = {}
 	c:foreach(CFG, "binding", function(s) bindings[#bindings + 1] = s end)
 	local migrated = 0
@@ -393,13 +506,17 @@ local function migrate_acls()
 	end
 	c:commit(PW)
 	c:commit(CFG)
-	return {ok=true, migrated=migrated, bindings=#bindings}
+	return {ok=true, migrated=migrated, bindings=#bindings, codes_created=codes_created, codes_assigned=codes_assigned}
 end
 
 local function prune_offline()
 	local c = uci.cursor()
 	if c:get(CFG, "global", "enabled") ~= "1" then return {ok=true, removed=0, disabled=true} end
 	local timeout = tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60
+	if timeout <= 0 then
+		sys.call("rm -rf /tmp/passwall-device-offline")
+		return {ok=true, removed=0, disabled=true}
+	end
 	timeout = math.max(15, math.min(86400, timeout))
 	local wireless, scanned = wifi_clients()
 	if not scanned then return {ok=false, removed=0, error="无法读取无线客户端状态"} end
@@ -491,13 +608,14 @@ local function bind(ip, code)
 	if limited then return {ok=false,error="失败次数过多，请 "..tostring(wait_seconds).." 秒后重试"} end
 	code = trim(code)
 	if code == "" then return {ok=false, error="请输入口令"} end
-	local meta
-	c:foreach(CFG, "node", function(s) if s.code == code then meta = s end end)
-	if not meta then
+	local code_meta = code_by_value(c, code)
+	if not code_meta then
 		rate_state(ip, true)
 		sys.call("logger -t passwall-device "..shellquote("口令失败 ip="..ip))
 		return {ok=false, error="口令无效"}
 	end
+	local meta = metadata_for_node(c, code_meta.node_id)
+	if not meta then return {ok=false, error="口令对应的节点已经不存在"} end
 	local nodes = node_map(c)
 	if not nodes[meta.passwall_id] then return {ok=false, error="口令对应的节点已经不存在"} end
 	local mac = ip_to_mac(ip)
@@ -505,9 +623,11 @@ local function bind(ip, code)
 	mac = mac:lower()
 	local hostname = hostname_for(c, mac, ip)
 	local old_mac = binding_for_mac(c, mac)
+	local old_code = binding_for_code(c, code_meta[".name"])
 	if old_mac then remove_binding(c, old_mac) end
+	if old_code and (not old_mac or old_code[".name"] ~= old_mac[".name"]) then remove_binding(c, old_code) end
 	local bid = new_section(c, CFG, "binding", "pwc_bind_", {
-		mac=mac, ip=ip, hostname=hostname, node_id=meta.passwall_id, acl_id="",
+		mac=mac, ip=ip, hostname=hostname, node_id=meta.passwall_id, code_id=code_meta[".name"], code=code, acl_id="",
 		state="pending", wireless="1", bound_at=os.date("%Y-%m-%d %H:%M:%S")
 	})
 	local acl = c:add(PW, "acl_rule")
@@ -552,8 +672,7 @@ local function bind(ip, code)
 	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
 	local _,_,rate_path=rate_state(ip,false); os.remove(rate_path)
 	sys.call("logger -t passwall-device "..shellquote("绑定成功 mac="..mac.." node="..(nodes[meta.passwall_id].remarks or meta.passwall_id)))
-	local shared = #bindings_for_node(active, meta.passwall_id)
-	return {ok=true, message="绑定成功", node=nodes[meta.passwall_id].remarks or meta.passwall_id, shared_devices=shared}
+	return {ok=true, message="绑定成功", node=nodes[meta.passwall_id].remarks or meta.passwall_id, code=code, kicked=old_code and old_code.mac or nil}
 end
 
 local function toggle(enabled)
@@ -568,30 +687,79 @@ local function toggle(enabled)
 	return rc == 0 and {ok=true, enabled=enabled == "1"} or {ok=false, error=trim(read_file("/tmp/pwc-toggle.log") or "启停失败")}
 end
 
-local function update_node(node_id, remarks, code)
+local reload_after_change
+
+local function update_node(node_id, remarks)
 	if not valid_id(node_id) then return {ok=false, error="节点标识无效"} end
 	remarks = trim(remarks)
-	code = trim(code)
 	if remarks == "" or #remarks > 128 then return {ok=false, error="节点名称不能为空且不能超过 128 个字符"} end
-	if code == "" or #code > 128 then return {ok=false, error="口令不能为空且不能超过 128 个字符"} end
 	local c = uci.cursor()
 	local node = c:get_all(PW, node_id)
 	local meta = metadata_for_node(c, node_id)
 	if not node or node[".type"] ~= "nodes" or not meta then return {ok=false, error="托管节点不存在"} end
-	local duplicate_name, duplicate_code = false, false
+	local duplicate_name = false
 	c:foreach(CFG, "node", function(s)
 		if s[".name"] ~= meta[".name"] and s.remarks == remarks then duplicate_name = true end
-		if s[".name"] ~= meta[".name"] and s.code == code then duplicate_code = true end
 	end)
 	if duplicate_name then return {ok=false, error="节点名称已存在"} end
-	if duplicate_code then return {ok=false, error="口令已被其他节点使用"} end
 	c:set(PW, node_id, "remarks", remarks)
 	c:set(CFG, meta[".name"], "remarks", remarks)
-	c:set(CFG, meta[".name"], "code", code)
 	c:commit(PW)
 	c:commit(CFG)
-	sys.call("logger -t passwall-device " .. shellquote("节点名称或口令已修改 node=" .. node_id))
-	return {ok=true, node_id=node_id, remarks=remarks, code=code}
+	sys.call("logger -t passwall-device " .. shellquote("节点名称已修改 node=" .. node_id))
+	return {ok=true, node_id=node_id, remarks=remarks}
+end
+
+local function update_code(code_id, value)
+	if not valid_id(code_id) then return {ok=false, error="口令标识无效"} end
+	value = trim(value)
+	if value == "" or #value > 128 then return {ok=false, error="口令不能为空且不能超过 128 个字符"} end
+	local c = uci.cursor()
+	local code = c:get_all(CFG, code_id)
+	if not code or code[".type"] ~= "code" then return {ok=false, error="口令不存在"} end
+	local duplicate = code_by_value(c, value)
+	if duplicate and duplicate[".name"] ~= code_id then return {ok=false, error="口令已被使用"} end
+	c:set(CFG, code_id, "value", value)
+	c:foreach(CFG, "binding", function(binding)
+		if binding.code_id == code_id then c:set(CFG, binding[".name"], "code", value) end
+	end)
+	c:commit(CFG)
+	return {ok=true, code_id=code_id, value=value}
+end
+
+local function add_codes(id_text, count)
+	local ids = parse_ids(id_text)
+	if not ids or #ids == 0 then return {ok=false, error="请选择有效的节点"} end
+	count = math.min(100, math.max(1, tonumber(count) or 1))
+	local c = uci.cursor()
+	for _, node_id in ipairs(ids) do
+		if not metadata_for_node(c, node_id) or not c:get(PW, node_id) then return {ok=false, error="托管节点不存在：" .. node_id} end
+	end
+	local prefix = c:get(CFG, "global", "code_prefix") or ""
+	local width = tonumber((c:get(CFG, "global", "code_width"))) or 3
+	local next_number = tonumber((c:get(CFG, "global", "next_code_number"))) or 1
+	local created = create_codes(c, ids, prefix, next_number, width, count)
+	c:commit(CFG)
+	return {ok=true, nodes=#ids, created=#created, codes=created}
+end
+
+local function delete_codes(id_text)
+	local ids = parse_ids(id_text)
+	if not ids or #ids == 0 then return {ok=false, error="请选择有效的口令"} end
+	local c, codes, affected = uci.cursor(), {}, {}
+	for _, id in ipairs(ids) do
+		local code = c:get_all(CFG, id)
+		if not code or code[".type"] ~= "code" then return {ok=false, error="口令不存在：" .. id} end
+		codes[#codes + 1] = code
+		local binding = binding_for_code(c, id)
+		if binding then affected[#affected + 1] = binding end
+	end
+	for _, binding in ipairs(affected) do remove_binding(c, binding) end
+	for _, code in ipairs(codes) do c:delete(CFG, code[".name"]) end
+	c:commit(PW); c:commit(CFG); c:commit("dhcp")
+	local rc = 0
+	if #affected > 0 then rc = reload_after_change("/tmp/pwc-delete-code.log") end
+	return {ok=rc == 0, deleted=#codes, disconnected=#affected, error=rc ~= 0 and "口令已删除，但 PassWall 重载失败" or nil}
 end
 
 local function update_binding(binding_id, remark)
@@ -607,7 +775,7 @@ local function update_binding(binding_id, remark)
 	return {ok=true, binding_id=binding_id, remark=remark, hostname=remark ~= "" and remark or (binding.hostname or "未知设备")}
 end
 
-local function reload_after_change(log_path)
+reload_after_change = function(log_path)
 	sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
 	sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
 	local rc = sys.call("/etc/init.d/passwall restart >" .. shellquote(log_path or "/tmp/pwc-passwall-apply.log") .. " 2>&1")
@@ -641,6 +809,13 @@ local function delete_nodes(id_text, replacement)
 	end
 	local affected = {}
 	c:foreach(CFG, "binding", function(s) if selected[s.node_id or ""] then affected[#affected+1] = s end end)
+	local affected_codes = {}
+	c:foreach(CFG, "code", function(s) if selected[s.node_id or ""] then affected_codes[#affected_codes + 1] = s end end)
+	for _, code in ipairs(affected_codes) do
+		if target then c:set(CFG, code[".name"], "node_id", target[".name"])
+		else c:delete(CFG, code[".name"])
+		end
+	end
 	for _, b in ipairs(affected) do
 		if target then
 			c:set(CFG, b[".name"], "node_id", target[".name"])
@@ -789,7 +964,7 @@ end
 local action=arg[1] or "status"
 if action=="status" then reply(list_status())
 elseif action=="extract" then local links, ignored=extract_links(read_file(arg[2]) or ""); reply({ok=true,links=links,ignored=ignored})
-elseif action=="import" then reply(import_nodes(arg[2],arg[3],arg[4],arg[5],arg[6],arg[7]))
+elseif action=="import" then reply(import_nodes(arg[2],arg[3],arg[4],arg[5],arg[6],arg[7],arg[8]))
 elseif action=="bind" then reply(bind(arg[2] or "",arg[3] or ""))
 elseif action=="toggle" then reply(toggle(arg[2]))
 elseif action=="delete-node" then reply(delete_nodes(arg[2] or "",arg[3] or ""))
@@ -797,7 +972,10 @@ elseif action=="delete-nodes" then reply(delete_nodes(arg[2] or "",arg[3] or "")
 elseif action=="unbind" then reply(unbind_many(arg[2] or ""))
 elseif action=="unbind-many" then reply(unbind_many(arg[2] or ""))
 elseif action=="test-node" then reply(test_node(arg[2] or ""))
-elseif action=="update-node" then reply(update_node(arg[2] or "",arg[3] or "",arg[4] or ""))
+elseif action=="update-node" then reply(update_node(arg[2] or "",arg[3] or ""))
+elseif action=="update-code" then reply(update_code(arg[2] or "",arg[3] or ""))
+elseif action=="add-codes" then reply(add_codes(arg[2] or "",arg[3] or "1"))
+elseif action=="delete-codes" then reply(delete_codes(arg[2] or ""))
 elseif action=="update-binding" then reply(update_binding(arg[2] or "",arg[3] or ""))
 elseif action=="check-update" then reply(check_update())
 elseif action=="install-update" then reply(install_update())
