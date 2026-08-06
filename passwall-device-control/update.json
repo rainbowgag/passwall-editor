@@ -1,7 +1,7 @@
 {
-  "version": "0.4.7",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.7_all.ipk",
-  "sha256": "71a7ae28579ad23416a67860d33c521b6b43e00886c8228a810f4177f4ef7154",
+  "version": "0.4.8",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.8_all.ipk",
+  "sha256": "534bf233a5531d01e5eec87a132e79e2406dd0ef9b61d713a17e3b3972b8f81c",
   "published_at": "2026-08-06",
-  "notes": "增强 Base64 认证 SOCKS 链接兼容性；完整解码用户名和密码，并自动使用 sing-box 进行节点检测和设备代理。"
+  "notes": "修复重复 DHCP 静态租约导致 dnsmasq 崩溃和代理全部失效；旧 SOCKS 节点自动迁移到 sing-box；有线电脑默认直连，仅 Wi-Fi 设备进入口令认证。"
 }

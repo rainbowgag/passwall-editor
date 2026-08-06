@@ -170,6 +170,14 @@ local function wifi_clients()
 	return clients, scanned
 end
 
+local function wifi_mac_list()
+	local clients, scanned = wifi_clients()
+	local macs = {}
+	for mac in pairs(clients) do macs[#macs + 1] = mac end
+	table.sort(macs)
+	return {ok=true, scanned=scanned, macs=macs}
+end
+
 local function list_status()
 	local c = uci.cursor()
 	local nodes = {}
@@ -237,7 +245,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.7"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.8"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -474,6 +482,49 @@ local function copy_acl_options(c, source, target)
 	end
 end
 
+local function dhcp_host_matches_mac(section, target_mac)
+	local value = section and section.mac or ""
+	if type(value) == "table" then
+		for _, item in ipairs(value) do
+			if tostring(item):lower() == target_mac then return true end
+		end
+		return false
+	end
+	for item in tostring(value):gmatch("[^%s,]+") do
+		if item:lower() == target_mac then return true end
+	end
+	return false
+end
+
+local function ensure_dhcp(c, mac, ip, hostname)
+	local target_mac = tostring(mac or ""):lower()
+	local id = "pwc_" .. target_mac:gsub(":", "")
+	local matches, preferred = {}, nil
+	c:foreach("dhcp", "host", function(section)
+		if dhcp_host_matches_mac(section, target_mac) then
+			matches[#matches + 1] = section[".name"]
+			if not tostring(section[".name"]):match("^pwc_") then preferred = section[".name"] end
+		end
+	end)
+	if preferred then
+		for _, name in ipairs(matches) do
+			if name ~= preferred and tostring(name):match("^pwc_") then c:delete("dhcp", name) end
+		end
+		return preferred, false
+	end
+	if #matches > 0 then return matches[1], false end
+	local ip_conflict = false
+	c:foreach("dhcp", "host", function(section)
+		if tostring(section.ip or "") == tostring(ip or "") then ip_conflict = true end
+	end)
+	if ip_conflict then return nil, false, "ip_conflict" end
+	c:set("dhcp", id, "host")
+	c:set("dhcp", id, "name", hostname ~= "未知设备" and hostname or id)
+	c:set("dhcp", id, "mac", mac)
+	c:set("dhcp", id, "ip", ip)
+	return id, true
+end
+
 local function migrate_codes(c)
 	local created, assigned = 0, 0
 	local metas = {}
@@ -524,7 +575,15 @@ local function migrate_acls()
 	local codes_created, codes_assigned = migrate_codes(c)
 	local bindings = {}
 	c:foreach(CFG, "binding", function(s) bindings[#bindings + 1] = s end)
-	local migrated = 0
+	local migrated, cores_migrated, dhcp_reused = 0, 0, 0
+	local has_sing_box = sys.call("test -x /usr/bin/sing-box") == 0
+	c:foreach(CFG, "node", function(meta)
+		local node_id = meta.passwall_id or ""
+		if has_sing_box and c:get(PW, node_id, "protocol") == "socks" and c:get(PW, node_id, "type") ~= "sing-box" then
+			c:set(PW, node_id, "type", "sing-box")
+			cores_migrated = cores_migrated + 1
+		end
+	end)
 	for _, binding in ipairs(bindings) do
 		if (binding.wireless or "") == "" then c:set(CFG, binding[".name"], "wireless", "1") end
 		local matches = managed_acls_for_binding(c, binding)
@@ -542,10 +601,15 @@ local function migrate_acls()
 			c:set(PW, acl[".name"], "pwc_binding_id", binding[".name"])
 			c:set(CFG, binding[".name"], "acl_id", acl[".name"])
 		end
+		local _, created = ensure_dhcp(c, binding.mac or "", binding.ip or "", binding.hostname or "未知设备")
+		if not created then dhcp_reused = dhcp_reused + 1 end
 	end
+	c:set(PW, "@global[0]", "client_proxy", "0")
 	c:commit(PW)
 	c:commit(CFG)
-	return {ok=true, migrated=migrated, bindings=#bindings, codes_created=codes_created, codes_assigned=codes_assigned}
+	c:commit("dhcp")
+	return {ok=true, migrated=migrated, cores_migrated=cores_migrated, dhcp_reused=dhcp_reused,
+		bindings=#bindings, codes_created=codes_created, codes_assigned=codes_assigned}
 end
 
 local function prune_offline()
@@ -631,15 +695,6 @@ local function rate_state(ip, increment)
 	return count>=5 and now-started<60, math.max(0,60-(now-started)), path
 end
 
-local function ensure_dhcp(c, mac, ip, hostname)
-	local id = "pwc_" .. mac:gsub(":", ""):lower()
-	c:set("dhcp", id, "host")
-	c:set("dhcp", id, "name", hostname ~= "未知设备" and hostname or id)
-	c:set("dhcp", id, "mac", mac)
-	c:set("dhcp", id, "ip", ip)
-	return id
-end
-
 local function bind(ip, code)
 	local c = uci.cursor()
 	if c:get(CFG, "global", "enabled") ~= "1" then return {ok=false, error="设备口令服务尚未启用"} end
@@ -690,7 +745,9 @@ local function bind(ip, code)
 	c:set(PW, acl, "udp_redir_ports", "1:65535")
 	c:set(PW, "@global[0]", "enabled", "1")
 	c:set(PW, "@global[0]", "acl_enable", "1")
-	c:set(PW, "@global[0]", "client_proxy", "1")
+	-- Only per-device ACLs use proxies. Unmatched LAN clients, including wired
+	-- computers, remain direct even when a bound node is unavailable.
+	c:set(PW, "@global[0]", "client_proxy", "0")
 	ensure_dhcp(c, mac, ip, hostname)
 	c:set(CFG, bid, "acl_id", acl)
 	c:commit(PW); c:commit(CFG); c:commit("dhcp")
@@ -720,6 +777,7 @@ local function toggle(enabled)
 	c:set(CFG, "global", "enabled", enabled)
 	if enabled == "1" then
 		c:set(PW, "@global[0]", "acl_enable", "1")
+		c:set(PW, "@global[0]", "client_proxy", "0")
 	end
 	c:commit(CFG); c:commit(PW)
 	local rc = sys.call("/etc/init.d/passwall-device " .. (enabled == "1" and "restart" or "stop") .. " >/tmp/pwc-toggle.log 2>&1")
@@ -1032,6 +1090,7 @@ elseif action=="delete-codes" then reply(delete_codes(arg[2] or ""))
 elseif action=="update-binding" then reply(update_binding(arg[2] or "",arg[3] or ""))
 elseif action=="check-update" then reply(check_update())
 elseif action=="install-update" then reply(install_update())
+elseif action=="wifi-macs" then reply(wifi_mac_list())
 elseif action=="migrate" then reply(migrate_acls())
 elseif action=="prune-offline" then reply(prune_offline())
 elseif action=="cleanup-acls" then reply(cleanup_acls())
