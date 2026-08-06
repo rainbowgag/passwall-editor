@@ -1,8 +1,8 @@
 Package: luci-app-passwall-device
-Version: 0.4.8
+Version: 0.4.9
 Architecture: all
 Maintainer: local
-Depends: luci-compat, luci-lua-runtime, luci-app-passwall, firewall4, nftables, curl, xray-core, sing-box
+Depends: luci-compat, luci-lua-runtime, luci-app-passwall, curl, xray-core, sing-box
 Section: luci
 Priority: optional
 Description: PassWall multi-code per-device proxy binding portal

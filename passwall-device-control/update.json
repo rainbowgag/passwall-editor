@@ -1,7 +1,7 @@
 {
-  "version": "0.4.8",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.8_all.ipk",
-  "sha256": "534bf233a5531d01e5eec87a132e79e2406dd0ef9b61d713a17e3b3972b8f81c",
+  "version": "0.4.9",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.9_all.ipk",
+  "sha256": "7a6abbe02b8e3b3f40d7135ecd3e910aa4742924f05660552d6c69b0c71e776e",
   "published_at": "2026-08-06",
-  "notes": "修复重复 DHCP 静态租约导致 dnsmasq 崩溃和代理全部失效；旧 SOCKS 节点自动迁移到 sing-box；有线电脑默认直连，仅 Wi-Fi 设备进入口令认证。"
+  "notes": "兼容 BleachWrt 等内置 firewall4/nftables 但包名或软件源架构不同的固件，避免 opkg 错误拉取不匹配的内核防火墙依赖。"
 }
