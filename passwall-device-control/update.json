@@ -1,7 +1,7 @@
 {
-  "version": "0.4.6",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.6_all.ipk",
-  "sha256": "d7fb7908b1d1415d0dde3128d35457b7293007a5affb0d5eae0c88ffee12b321",
+  "version": "0.4.7",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.7_all.ipk",
+  "sha256": "71a7ae28579ad23416a67860d33c521b6b43e00886c8228a810f4177f4ef7154",
   "published_at": "2026-08-06",
-  "notes": "新增标准 Trojan 与 Shadowsocks 链接批量导入支持；SS 兼容 SIP002 和旧式 Base64 格式，Trojan 自动使用 sing-box。"
+  "notes": "增强 Base64 认证 SOCKS 链接兼容性；完整解码用户名和密码，并自动使用 sing-box 进行节点检测和设备代理。"
 }

@@ -237,7 +237,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.6"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.7"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -388,11 +388,10 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 		if find_node_by_remark(c, remark) and (find_node_by_remark(c, remark)[".name"] ~= n[".name"]) then
 			remark = remark .. "-" .. tostring(i)
 		end
-		-- Some REALITY servers accept the same link through sing-box but reject
-		-- Xray's handshake. Prefer sing-box for imported VLESS REALITY nodes when
-		-- that core is available, so health checks and ACL traffic use it.
+		-- Prefer sing-box for imported SOCKS nodes and protocol variants that have
+		-- shown core-specific compatibility differences during health checks.
 		local is_trojan = n.protocol == "trojan" or n.type == "Trojan-Plus"
-		if has_sing_box and ((n.protocol == "vless" and n.reality == "1") or is_trojan) then
+		if has_sing_box and ((n.protocol == "vless" and n.reality == "1") or is_trojan or n.protocol == "socks") then
 			c:set(PW, n[".name"], "type", "sing-box")
 			n.type = "sing-box"
 			if is_trojan then
