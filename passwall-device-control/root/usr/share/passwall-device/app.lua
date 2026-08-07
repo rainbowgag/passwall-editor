@@ -54,12 +54,25 @@ local function percent_decode(s)
 	return (tostring(s or ""):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
 end
 
+-- 拆分 "链接#备注---口令1 口令2 口令3" 中的显式口令
+local function split_link_codes(value)
+	local link, suffix = tostring(value or ""):match("^(.-)%-%-%-(.-)$")
+	if not suffix then return tostring(value or ""), nil end
+	local list = {}
+	for code in tostring(suffix):gmatch("[^%s,，]+") do
+		code = trim(code)
+		if code ~= "" then list[#list + 1] = code end
+	end
+	return trim(link), (#list > 0) and list or nil
+end
+
 local section_counter = 0
 local function new_section(c, config, section_type, prefix, values)
 	section_counter = section_counter + 1
 	local id
 	repeat
-		id = (prefix or "pwc_") .. string.format("%08x%04x%02x", os.time() % 4294967296, nixio.getpid() % 65536, section_counter % 256)
+		-- 定制 Lua（double int32）里 %x 要求整数，2^32 取模会变成浮点数，改用 2^31-1
+		id = (prefix or "pwc_") .. string.format("%08x%04x%02x", os.time() % 2147483647, nixio.getpid() % 65536, section_counter % 256)
 		section_counter = section_counter + 1
 	until not c:get(config, id)
 	c:set(config, id, section_type)
@@ -253,15 +266,20 @@ local function list_status()
 end
 
 local function extract_links(text)
-	local links, errors, seen = {}, {}, {}
+	local links, errors, seen, link_codes = {}, {}, {}, {}
 	local accepted = {vmess=true, vless=true, trojan=true, ["trojan-go"]=true, ss=true, socks=true, socks5=true}
 	local function add(value)
 		value = trim(value):gsub("[,;%)%]，；。]+$", "")
-		if value ~= "" and not seen[value] then seen[value] = true; links[#links+1] = value end
+		local clean, explicit = split_link_codes(value)
+		if clean ~= "" and not seen[clean] then
+			seen[clean] = true
+			links[#links + 1] = clean
+			link_codes[#links] = explicit
+		end
 	end
 	for line in tostring(text or ""):gmatch("[^\r\n]+") do
 		local found = false
-		for scheme, value in line:gmatch("([%a][%w+.-]*)://([^%s<>\"']+)") do
+		for scheme, value in line:gmatch("([%a][%w+.-]*)://(.+)$") do
 			scheme = scheme:lower()
 			if accepted[scheme] then add(scheme .. "://" .. value); found = true end
 		end
@@ -278,7 +296,7 @@ local function extract_links(text)
 		end
 		if not found and trim(line) ~= "" then errors[#errors+1] = trim(line) end
 	end
-	return links, errors
+	return links, errors, link_codes
 end
 
 local function parse_socks_link(link)
@@ -341,15 +359,32 @@ local function create_codes(c, node_ids, code_prefix, code_start, code_width, co
 	return created, number
 end
 
+local function create_explicit_codes(c, node_id, values)
+	local created = {}
+	for _, raw in ipairs(values or {}) do
+		local value = trim(raw)
+		if value ~= "" and #value <= 64 and not code_in_use(c, value) then
+			local id = new_section(c, CFG, "code", "pwc_code_", {
+				node_id=node_id, value=value,
+				created_at=os.date("%Y-%m-%d %H:%M:%S") .. string.format(".%06d", #created + 1)
+			})
+			created[#created + 1] = {id=id, node_id=node_id, value=value}
+		end
+	end
+	return created
+end
+
 local function import_nodes(path, prefix, start_number, code_prefix, code_start, code_width, code_count)
 	local text = read_file(path)
 	if not text then return {ok=false, error="无法读取导入内容"} end
-	local links, ignored = extract_links(text)
+	local links, ignored, link_codes = extract_links(text)
 	if #links == 0 then return {ok=false, error="没有找到 VMess、VLESS、Trojan、Trojan-Go、SS 或 SOCKS 节点"} end
 	local before = node_map(uci.cursor())
 	local official = {}
+	local official_codes = {}
 	local socks_cursor = uci.cursor()
-	for _, link in ipairs(links) do
+	local socks_explicit = {}
+	for i, link in ipairs(links) do
 		local socks = parse_socks_link(link)
 		if socks then
 			local id = new_section(socks_cursor, PW, "nodes", "pwc_node_", {
@@ -357,11 +392,13 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 				type="Xray", protocol="socks", address=socks.host, port=socks.port,
 				username=socks.username, password=socks.password
 			})
+			if link_codes[i] then socks_explicit[#socks_explicit + 1] = {id=id, codes=link_codes[i]} end
 		else
 			-- PassWall parses Trojan links but does not recognize the historical
 			-- trojan-go scheme. Normalize only the scheme and preserve the WS/TLS
 			-- query parameters for its official parser.
 			official[#official+1] = link:gsub("^trojan%-go://", "trojan://", 1)
+			if link_codes[i] then official_codes[#official_codes + 1] = link_codes[i] end
 		end
 	end
 	socks_cursor:commit(PW)
@@ -388,8 +425,12 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 	code_start = math.max(0, tonumber(code_start) or 1)
 	code_width = math.min(12, math.max(1, tonumber(code_width) or 3))
 	code_count = math.min(100, math.max(1, tonumber(code_count) or 1))
-	local results, node_ids = {}, {}
+	local results, auto_node_ids = {}, {}
 	local has_sing_box = sys.call("test -x /usr/bin/sing-box") == 0
+	-- socks 节点在前、官方解析节点在后的显式口令队列
+	local explicit_queue = {}
+	for _, item in ipairs(socks_explicit) do explicit_queue[#explicit_queue + 1] = item end
+	for _, codes in ipairs(official_codes) do explicit_queue[#explicit_queue + 1] = {codes=codes} end
 	for i, n in ipairs(added) do
 		local remark = n.remarks or n[".name"]
 		if trim(prefix) ~= "" then remark = trim(prefix) .. tostring(start_number + i - 1) end
@@ -409,19 +450,34 @@ local function import_nodes(path, prefix, start_number, code_prefix, code_start,
 		end
 		c:set(PW, n[".name"], "remarks", remark)
 		new_section(c, CFG, "node", "pwc_meta_", {passwall_id=n[".name"], remarks=remark, created_at=os.date("%Y-%m-%d %H:%M:%S")})
-		node_ids[#node_ids + 1] = n[".name"]
-		results[#results+1] = {id=n[".name"], remarks=remark, protocol=n.protocol or "", codes={}}
+		local result = {id=n[".name"], remarks=remark, protocol=n.protocol or "", codes={}}
+		if explicit_queue[i] then
+			result.explicit_codes = explicit_queue[i].codes
+		else
+			auto_node_ids[#auto_node_ids + 1] = n[".name"]
+		end
+		results[#results+1] = result
 	end
-	local created = create_codes(c, node_ids, code_prefix, code_start, code_width, code_count)
+	local created = create_codes(c, auto_node_ids, code_prefix, code_start, code_width, code_count)
+	local explicit_created = {}
+	for _, result in ipairs(results) do
+		if result.explicit_codes then
+			local items = create_explicit_codes(c, result.id, result.explicit_codes)
+			local values = {}
+			for _, item in ipairs(items) do values[#values + 1] = item.value end
+			result.codes = values
+			for _, item in ipairs(items) do explicit_created[#explicit_created + 1] = item end
+		end
+	end
 	local by_node = {}
 	for _, item in ipairs(created) do
 		by_node[item.node_id] = by_node[item.node_id] or {}
 		by_node[item.node_id][#by_node[item.node_id] + 1] = item.value
 	end
-	for _, result in ipairs(results) do result.codes = by_node[result.id] or {} end
+	for _, result in ipairs(results) do result.codes = by_node[result.id] or result.codes or {} end
 	c:commit(PW)
 	c:commit(CFG)
-	return {ok=true, imported=#results, codes_created=#created, extracted=#links, ignored=#ignored, nodes=results, warnings=ignored}
+	return {ok=true, imported=#results, codes_created=#created + #explicit_created, extracted=#links, ignored=#ignored, nodes=results, warnings=ignored}
 end
 
 local function ip_to_mac(ip)

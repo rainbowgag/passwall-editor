@@ -1,7 +1,7 @@
 {
-  "version": "0.4.9",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.9_all.ipk",
-  "sha256": "7a6abbe02b8e3b3f40d7135ecd3e910aa4742924f05660552d6c69b0c71e776e",
+  "version": "0.5.0",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.5.0_all.ipk",
+  "sha256": "5b771e6f1237c7c01e730a38b4481419a7b7a7eddc92785551b48b42d53c3a6b",
   "published_at": "2026-08-06",
-  "notes": "兼容 BleachWrt 等内置 firewall4/nftables 但包名或软件源架构不同的固件，避免 opkg 错误拉取不匹配的内核防火墙依赖。"
+  "notes": "修复 iStoreOS LuCI 的 Access Violation（API 路由拍平、控制器不再依赖顶层局部变量）；兼容定制 Lua 整数格式化；支持链接末尾 ---口令1 口令2 口令3 批量导入指定口令；适配 PassWall 26.x 的 Reality 节点。"
 }

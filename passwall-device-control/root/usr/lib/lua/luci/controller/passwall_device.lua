@@ -5,10 +5,20 @@ local sys = require "luci.sys"
 local util = require "luci.util"
 local jsonc = require "luci.jsonc"
 local uci_model = require "luci.model.uci"
-local nixio = require "nixio"
 
 local CONFIG = "passwall_device"
 local APP = "/usr/share/passwall-device/app.lua"
+
+local function getpid()
+	local f = io.open("/proc/self/stat", "r")
+	if f then
+		local line = f:read("*l")
+		f:close()
+		local pid = line and line:match("^(%d+)")
+		if pid then return tonumber(pid) end
+	end
+	return 0
+end
 
 local function json(data)
 	http.prepare_content("application/json")
@@ -27,27 +37,32 @@ local function run(action, args)
 end
 
 function index()
-	if not nixio.fs.access("/etc/config/" .. CONFIG) then return end
+	-- 不使用模块顶层 local（LuCI 字节码缓存还原后 upvalue 会丢失）
+	local cfg = io.open("/etc/config/passwall_device", "r")
+	if not cfg then return end
+	cfg:close()
 
 	local page = entry({"admin", "services", "passwall_device"}, template("passwall_device/main"), _("PassWall 设备口令"), 3)
 	page.dependent = true
 	page.acl_depends = { "luci-app-passwall-device" }
 
-	entry({"admin", "services", "passwall_device", "api", "status"}, call("api_status")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "import"}, call("api_import")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "toggle"}, call("api_toggle")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "delete"}, call("api_delete")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "delete-many"}, call("api_delete_many")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "unbind"}, call("api_unbind")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "unbind-many"}, call("api_unbind_many")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "test"}, call("api_test")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "edit"}, call("api_edit")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "edit-code"}, call("api_edit_code")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "add-codes"}, call("api_add_codes")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "delete-codes"}, call("api_delete_codes")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "edit-binding"}, call("api_edit_binding")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "version"}, call("api_version")).leaf = true
-	entry({"admin", "services", "passwall_device", "api", "update"}, call("api_update")).leaf = true
+	-- 单级子入口，避免 iStoreOS LuCI 对多级 api/* 路径触发
+	-- "Access Violation: has no parent node"（中间节点 auto=true 与父页面 dependent=true 冲突）
+	entry({"admin", "services", "passwall_device", "status"}, call("api_status")).leaf = true
+	entry({"admin", "services", "passwall_device", "import"}, call("api_import")).leaf = true
+	entry({"admin", "services", "passwall_device", "toggle"}, call("api_toggle")).leaf = true
+	entry({"admin", "services", "passwall_device", "delete"}, call("api_delete")).leaf = true
+	entry({"admin", "services", "passwall_device", "delete-many"}, call("api_delete_many")).leaf = true
+	entry({"admin", "services", "passwall_device", "unbind"}, call("api_unbind")).leaf = true
+	entry({"admin", "services", "passwall_device", "unbind-many"}, call("api_unbind_many")).leaf = true
+	entry({"admin", "services", "passwall_device", "test"}, call("api_test")).leaf = true
+	entry({"admin", "services", "passwall_device", "edit"}, call("api_edit")).leaf = true
+	entry({"admin", "services", "passwall_device", "edit-code"}, call("api_edit_code")).leaf = true
+	entry({"admin", "services", "passwall_device", "add-codes"}, call("api_add_codes")).leaf = true
+	entry({"admin", "services", "passwall_device", "delete-codes"}, call("api_delete_codes")).leaf = true
+	entry({"admin", "services", "passwall_device", "edit-binding"}, call("api_edit_binding")).leaf = true
+	entry({"admin", "services", "passwall_device", "version"}, call("api_version")).leaf = true
+	entry({"admin", "services", "passwall_device", "update"}, call("api_update")).leaf = true
 
 	local portal = entry({"pwc"}, template("passwall_device/portal"))
 	portal.sysauth = false
@@ -70,7 +85,7 @@ function api_import()
 	local code_width = http.formvalue("code_width") or "3"
 	local code_count = http.formvalue("code_count") or "1"
 	if #links > 524288 then return json({ok=false, error="导入内容不能超过 512KB"}) end
-	local path = "/tmp/pwc-import-" .. tostring(nixio.getpid()) .. ".txt"
+	local path = "/tmp/pwc-import-" .. tostring(getpid()) .. ".txt"
 	local f = io.open(path, "w")
 	if not f then return json({ok=false, error="无法创建导入临时文件"}) end
 	f:write(links)

@@ -12,7 +12,7 @@
  <div class="pwc-card">
   <h3>批量导入节点</h3>
   <div class="pwc-grid">
-   <div><textarea id="links" class="pwc-input pwc-code" rows="10" placeholder="可粘贴混杂文本，自动提取 vmess://、vless://、trojan://、trojan-go://、ss://、socks://、socks5:// 或 IP:端口:用户名:密码"></textarea></div>
+   <div><textarea id="links" class="pwc-input pwc-code" rows="10" placeholder="可粘贴混杂文本，自动提取 vmess://、vless://、trojan://、trojan-go://、ss://、socks://、socks5:// 或 IP:端口:用户名:密码&#10;&#10;链接末尾加 ---口令1 口令2 口令3 可为该节点批量创建指定口令，如：&#10;vless://...#节点备注---A101 A102 A103"></textarea></div>
    <div>
     <label>节点名称前缀（留空保留链接名称）</label><input id="prefix" class="pwc-input" placeholder="例如：德国">
     <div class="pwc-row" style="margin-top:10px"><label>名称起始</label><input id="start" class="pwc-input pwc-small" type="number" value="1"><label>口令前缀</label><input id="code_prefix" class="pwc-input pwc-small"><label>口令起始</label><input id="code_start" class="pwc-input pwc-small" type="number" value="1"><label>位数</label><input id="code_width" class="pwc-input pwc-small" type="number" value="3" min="1" max="12"><label>每节点口令数</label><input id="code_count" class="pwc-input pwc-small" type="number" value="1" min="1" max="100"></div>
@@ -27,7 +27,7 @@
 </div>
 <script>
 (function(){
- const base='<%=luci.dispatcher.build_url("admin","services","passwall_device","api")%>';
+ const base='<%=luci.dispatcher.build_url("admin","services","passwall_device")%>';
  let state={enabled:false,nodes:[],bindings:[]};
  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const norm=s=>String(s||'').toLowerCase();
