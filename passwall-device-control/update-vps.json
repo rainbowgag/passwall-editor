@@ -1,10 +1,16 @@
 {
-  "version": "0.6.0",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.6.0_all.ipk",
-  "sha256": "a69f414559a029d09541bc74763fc03dea369bf359a7bb17f6b7ced2da06e493",
+  "version": "0.6.1",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.6.1_all.ipk",
+  "sha256": "566f6a73681a20450c37b141e9382c0da4cfe0d21dc5ce5ab4ea160f9b4b040b",
   "published_at": "2026-08-07",
-  "notes": "新增一键恢复初始配置；支持回退到历史版本（清单携带最近 5 个版本）；验证并回归修复手机连接 Wi-Fi 不弹认证窗口的问题（0.4.9 在 iStoreOS/Kwrt 上的 Access Violation 已随 0.5.0 修复）。",
+  "notes": "修复解绑/忘记网络重连后不弹认证窗口的问题：guard 无线集合轮询从 5 秒缩短到 1 秒，无线设备离线后 MAC 保留 10 分钟，消除新设备关联与认证检测之间的竞态窗口。",
   "history": [
+    {
+      "version": "0.6.0",
+      "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.6.0_all.ipk",
+      "sha256": "a69f414559a029d09541bc74763fc03dea369bf359a7bb17f6b7ced2da06e493",
+      "notes": "新增一键恢复初始配置；支持回退到历史版本；一键安装/卸载脚本。"
+    },
     {
       "version": "0.5.0",
       "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.5.0_all.ipk",
@@ -28,12 +34,6 @@
       "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.7_all.ipk",
       "sha256": "71a7ae28579ad23416a67860d33c521b6b43e00886c8228a810f4177f4ef7154",
       "notes": "界面优化与兼容性修正。"
-    },
-    {
-      "version": "0.4.6",
-      "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.4.6_all.ipk",
-      "sha256": "d7fb7908b1d1415d0dde3128d35457b7293007a5affb0d5eae0c88ffee12b321",
-      "notes": "门户 DNS 锚定加固与健康检测。"
     }
   ]
 }

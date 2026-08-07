@@ -3,6 +3,8 @@
 set -eu
 CONFIG=passwall_device
 TABLE=pwc_portal
+WIFI_SEEN_DIR=/tmp/passwall-device-wifi-seen
+WIFI_GRACE=600
 
 use_nft() {
 	command -v nft >/dev/null 2>&1 || return 1
@@ -24,9 +26,30 @@ collect_macs() {
 	uci -q get "$CONFIG.global.admin_macs" 2>/dev/null | tr ' ' '\n' | while read -r mac; do
 		echo "$mac" | grep -Eq '^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$' && echo "$mac" >> "$macs" || true
 	done
+	# 当前无线客户端；同时记录到 seen 目录（离线后保留 WIFI_GRACE 秒，避免重连竞态）
+	mkdir -p "$WIFI_SEEN_DIR"
+	now="$(date +%s)"
 	/usr/share/passwall-device/app.lua wifi-macs 2>/dev/null | jsonfilter -e '@.macs[*]' 2>/dev/null | while read -r mac; do
-		echo "$mac" | grep -Eq '^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$' && echo "$mac" >> "$wifi_macs" || true
+		if echo "$mac" | grep -Eq '^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$'; then
+			echo "$mac" >> "$wifi_macs"
+			echo "$now" > "$WIFI_SEEN_DIR/$(echo "$mac" | tr -d ':')"
+		fi
 	done
+	# 保留期内的无线设备
+	for f in "$WIFI_SEEN_DIR"/*; do
+		[ -f "$f" ] || continue
+		key="$(basename "$f")"
+		ts="$(cat "$f" 2>/dev/null || echo 0)"
+		[ "$ts" -ge 0 ] 2>/dev/null || continue
+		if [ $((now - ts)) -lt "$WIFI_GRACE" ]; then
+			mac="$(printf '%s:%s:%s:%s:%s:%s' \
+				"$(echo "$key" | cut -c1-2)" "$(echo "$key" | cut -c3-4)" "$(echo "$key" | cut -c5-6)" \
+				"$(echo "$key" | cut -c7-8)" "$(echo "$key" | cut -c9-10)" "$(echo "$key" | cut -c11-12)")"
+			echo "$mac" >> "$wifi_macs"
+		fi
+	done
+	# 清理过期记录
+	find "$WIFI_SEEN_DIR" -type f -mmin +$((WIFI_GRACE / 60)) -delete 2>/dev/null || true
 }
 
 nft_setup() {

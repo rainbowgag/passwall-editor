@@ -66,7 +66,7 @@ chmod +x install.sh
 或者直接安装已构建的包：
 
 ```sh
-opkg install luci-app-passwall-device_0.6.0_all.ipk
+opkg install luci-app-passwall-device_0.6.1_all.ipk
 ```
 
 安装后认证服务保持关闭。先进入“服务 → PassWall 设备口令”导入并检查节点，再启用认证服务。
@@ -74,20 +74,26 @@ opkg install luci-app-passwall-device_0.6.0_all.ipk
 GitHub 一键安装或升级：
 
 ```sh
-{ [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.6.0_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "a69f414559a029d09541bc74763fc03dea369bf359a7bb17f6b7ced2da06e493" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+{ [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.6.1_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "566f6a73681a20450c37b141e9382c0da4cfe0d21dc5ce5ab4ea160f9b4b040b" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 VPS 一键安装或升级：
 
 ```sh
-{ [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.6.0_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "a69f414559a029d09541bc74763fc03dea369bf359a7bb17f6b7ced2da06e493" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+{ [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && wget -O /tmp/passwall-device.ipk http://m.yaml.uk:25532/luci-app-passwall-device_0.6.1_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "566f6a73681a20450c37b141e9382c0da4cfe0d21dc5ce5ab4ea160f9b4b040b" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 ### 历史版本一键安装（最近 5 个版本）
 
 测试新版本后如需回退，或需要在多台设备上安装特定版本，可直接使用对应版本的一键命令（安装前均校验 SHA-256）。页面内“检查更新 → 回退到该版本”也可以直接回退到清单中携带的历史版本。
 
-#### 0.6.0（当前）
+#### 0.6.1（当前）
+
+```sh
+{ [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.6.1_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "566f6a73681a20450c37b141e9382c0da4cfe0d21dc5ce5ab4ea160f9b4b040b" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
+```
+
+#### 0.6.0
 
 ```sh
 { [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.6.0_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "a69f414559a029d09541bc74763fc03dea369bf359a7bb17f6b7ced2da06e493" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
@@ -109,12 +115,6 @@ VPS 一键安装或升级：
 
 ```sh
 { [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.4.8_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "534bf233a5531d01e5eec87a132e79e2406dd0ef9b61d713a17e3b3972b8f81c" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
-```
-
-#### 0.4.7
-
-```sh
-{ [ -x /usr/bin/sing-box ] || { opkg update && opkg install sing-box; }; } && curl -4 -fL --retry 2 --connect-timeout 15 -o /tmp/passwall-device.ipk https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.4.7_all.ipk && [ "$(sha256sum /tmp/passwall-device.ipk | awk '{print $1}')" = "71a7ae28579ad23416a67860d33c521b6b43e00886c8228a810f4177f4ef7154" ] && opkg install /tmp/passwall-device.ipk && { [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart; } && /etc/init.d/passwall-device enable && { [ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart; }
 ```
 
 > 发布新版本时，请把 `dist/` 下新版本 IPK 与 `update.json` 同步上传到 VPS（`m.yaml.uk:25532`），保持 IPK 文件名与 SHA-256 一致。VPS 当前的 0.4.9 为旧构建（哈希不同），0.5.0/0.6.0 尚未上传，上传后 VPS 一键命令同样可用。

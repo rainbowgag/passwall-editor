@@ -2,10 +2,14 @@
 
 last_state=""
 last_fingerprint=""
+count=0
 
-while sleep 5; do
-	[ "$(uci -q get passwall_device.global.enabled)" = "1" ] || continue
-	/usr/share/passwall-device/app.lua prune-offline >/tmp/pwc-prune.log 2>&1 || true
+while true; do
+	count=$((count + 1))
+	[ "$(uci -q get passwall_device.global.enabled)" = "1" ] || { sleep 1; continue; }
+	if [ $((count % 5)) -eq 0 ]; then
+		/usr/share/passwall-device/app.lua prune-offline >/tmp/pwc-prune.log 2>&1 || true
+	fi
 	fingerprint="$({
 		uci -q show passwall_device | grep -E '\.(mac|state|admin_macs)='
 		/usr/share/passwall-device/app.lua wifi-macs 2>/dev/null | jsonfilter -e '@.macs[*]' 2>/dev/null
@@ -27,4 +31,5 @@ while sleep 5; do
 		last_state=down
 		last_fingerprint="$fingerprint"
 	fi
+	sleep 1
 done
