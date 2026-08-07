@@ -18,16 +18,20 @@ fi
 
 say() { printf '%s\n' "$*"; }
 
-fetch_manifest() {
+# 拉取所有可用源的清单到 /tmp/pw-meta-N.json，输出可用数量
+fetch_all_manifests() {
+	n=0
 	for u in $UPDATE_SOURCES; do
-		curl -4 -fsSL --connect-timeout 5 --max-time 12 "$u" -o /tmp/pw-update.json 2>/dev/null && return 0
+		if curl -4 -fsSL --connect-timeout 5 --max-time 12 "$u" -o "/tmp/pw-meta-$n.json" 2>/dev/null; then
+			n=$((n + 1))
+		fi
 	done
-	return 1
+	echo "$n"
 }
 
-# busybox 环境没有 jq，用 sed 提取 JSON 首个字段
+# busybox 环境没有 jq，用 sed 提取第 $1 份清单的字段 $2
 jget() {
-	sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" /tmp/pw-update.json 2>/dev/null | head -n1
+	sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "/tmp/pw-meta-$1.json" 2>/dev/null | head -n1
 }
 
 installed_version() {
@@ -48,24 +52,46 @@ ver_ge() {
 
 do_install() {
 	say "==> 获取最新版本信息..."
-	fetch_manifest || { say "获取更新信息失败，请检查路由器网络"; return 1; }
-	VERSION="$(jget version)"
-	IPK_URL="$(jget ipk_url)"
-	SHA256="$(jget sha256)"
-	[ -n "$VERSION" ] && [ -n "$IPK_URL" ] && [ -n "$SHA256" ] || { say "更新清单不完整"; return 1; }
+	N="$(fetch_all_manifests)"
+	[ "$N" -gt 0 ] || { say "获取更新信息失败，请检查路由器网络"; return 1; }
+	VERSION="$(jget 0 version)"
+	[ -n "$VERSION" ] || { say "更新清单不完整"; return 1; }
 	say "    最新版本: $VERSION"
 	cur="$(installed_version)"
 	if [ -n "$cur" ] && ver_ge "$cur" "$VERSION"; then
 		say "当前已安装 $cur，不低于清单版本 $VERSION，无需重复安装"
 		return 0
 	fi
-	say "==> 下载安装包..."
-	curl -4 -fsSL --connect-timeout 8 --max-time 120 "$IPK_URL" -o /tmp/pw.ipk || { say "安装包下载失败"; return 1; }
-	ACTUAL="$(sha256sum /tmp/pw.ipk 2>/dev/null | awk '{print $1}')"
-	[ "$ACTUAL" = "$SHA256" ] || { say "SHA-256 校验失败，已拒绝安装"; rm -f /tmp/pw.ipk; return 1; }
+	# 依次尝试每个可用源的安装包（下载 + SHA-256 校验，任一源成功即继续）
+	downloaded=0
+	i=0
+	while [ "$i" -lt "$N" ]; do
+		IPK_URL="$(jget "$i" ipk_url)"
+		SHA256="$(jget "$i" sha256)"
+		i=$((i + 1))
+		[ -n "$IPK_URL" ] && [ -n "$SHA256" ] || continue
+		say "    尝试源 $i/$N 下载安装包..."
+		if curl -4 -fsSL --connect-timeout 10 --max-time 180 "$IPK_URL" -o /tmp/pw.ipk 2>/dev/null; then
+			ACTUAL="$(sha256sum /tmp/pw.ipk 2>/dev/null | awk '{print $1}')"
+			if [ "$ACTUAL" = "$SHA256" ]; then
+				downloaded=1
+				break
+			fi
+			say "    SHA-256 校验失败，尝试下一个源"
+		else
+			say "    下载失败，尝试下一个源"
+		fi
+		rm -f /tmp/pw.ipk
+	done
+	if [ "$downloaded" != 1 ]; then
+		say "安装包下载或校验失败，请稍后重试"
+		rm -f /tmp/pw.ipk
+		return 1
+	fi
 	say "==> 安装 $PKG ..."
 	opkg install /tmp/pw.ipk || { rm -f /tmp/pw.ipk; say "安装失败"; return 1; }
 	rm -f /tmp/pw.ipk
+	rm -f /tmp/pw-meta-*.json
 	say "==> 启动服务..."
 	{ [ ! -x /etc/init.d/passwall ] || /etc/init.d/passwall restart >/dev/null 2>&1; } || true
 	/etc/init.d/passwall-device enable >/dev/null 2>&1 || true
