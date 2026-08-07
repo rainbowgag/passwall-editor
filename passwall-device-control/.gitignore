@@ -1,3 +1,4 @@
 dist/*
 !dist/luci-app-passwall-device_0.4.9_all.ipk
+!dist/luci-app-passwall-device_*.ipk
 !dist/passwall-device-control-0.4.9-source.tar.gz

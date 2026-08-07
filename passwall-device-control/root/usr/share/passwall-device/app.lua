@@ -258,7 +258,7 @@ local function list_status()
 		passwall_enabled=c:get(PW, "@global[0]", "enabled") == "1",
 		nodes=nodes, bindings=bindings,
 		lan_ip=(scalar(c:get("network", "lan", "ipaddr"), "10.0.0.1"):gsub("/.*$", "")),
-		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.4.9"),
+		version=trim(read_file("/usr/share/passwall-device/VERSION") or "0.6.0"),
 		wireless_scanned=wireless_scanned,
 		offline_unbind_seconds=tonumber((c:get(CFG, "global", "offline_unbind_seconds"))) or 60,
 		logs=trim(sys.exec("logread -e passwall-device 2>/dev/null | tail -n 50") or "")
@@ -1008,6 +1008,54 @@ local function unbind_many(id_text)
 	return {ok=rc == 0, removed=#bindings, error=rc ~= 0 and "设备已解绑，但 PassWall 重载失败" or nil}
 end
 
+-- 一键恢复初始配置：清空全部节点、口令、设备绑定与相关规则，
+-- 停用认证服务，并把 PassWall 恢复到安装前快照状态。
+local function reset_all()
+	local c = uci.cursor()
+	local bindings, codes, metas = {}, {}, {}
+	c:foreach(CFG, "binding", function(s) bindings[#bindings + 1] = s end)
+	c:foreach(CFG, "code", function(s) codes[#codes + 1] = s end)
+	c:foreach(CFG, "node", function(s) metas[#metas + 1] = s end)
+	local deleted_nodes = {}
+	for _, binding in ipairs(bindings) do remove_binding(c, binding) end
+	for _, code in ipairs(codes) do c:delete(CFG, code[".name"]) end
+	for _, meta in ipairs(metas) do
+		local node_id = meta.passwall_id or ""
+		if node_id ~= "" and c:get(PW, node_id) then
+			c:delete(PW, node_id)
+			deleted_nodes[#deleted_nodes + 1] = node_id
+		end
+		c:delete(CFG, meta[".name"])
+	end
+	local acls = {}
+	c:foreach(PW, "acl_rule", function(s)
+		if s.pwc_managed == "1" or (s.pwc_binding_id or "") ~= "" or (s.remarks or ""):match("^PWC ") then
+			acls[#acls + 1] = s[".name"]
+		end
+	end)
+	for _, name in ipairs(acls) do c:delete(PW, name) end
+	-- 全局配置恢复默认
+	c:set(CFG, "global", "enabled", "0")
+	c:set(CFG, "global", "code_start", "1")
+	c:set(CFG, "global", "code_width", "3")
+	c:delete(CFG, "global", "code_prefix")
+	c:delete(CFG, "global", "next_code_number")
+	c:delete(CFG, "global", "admin_macs")
+	c:commit(PW); c:commit(CFG); c:commit("dhcp")
+	-- 停用认证服务并恢复 PassWall 安装前快照
+	sys.call("/etc/init.d/passwall-device stop >/dev/null 2>&1 || true")
+	local previous_enabled = c:get(CFG, "global", "previous_passwall_enabled")
+	local previous_acl = c:get(CFG, "global", "previous_acl_enable")
+	if previous_enabled ~= nil then c:set(PW, "@global[0]", "enabled", previous_enabled) end
+	if previous_acl ~= nil then c:set(PW, "@global[0]", "acl_enable", previous_acl) end
+	c:commit(PW)
+	sys.call("/etc/init.d/passwall restart >/dev/null 2>&1 || true")
+	sys.call("/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true")
+	sys.call("logger -t passwall-device " .. shellquote("已恢复初始配置：删除节点 " .. #deleted_nodes .. " 个、口令 " .. #codes .. " 个、绑定 " .. #bindings .. " 台"))
+	return {ok=true, message="已恢复初始配置，所有节点、口令和设备绑定已清空，认证服务已停用",
+		deleted_nodes=#deleted_nodes, deleted_codes=#codes, deleted_bindings=#bindings}
+end
+
 local function record_node_test(node_id, result)
 	local c = uci.cursor()
 	local meta = metadata_for_node(c, node_id)
@@ -1072,17 +1120,44 @@ local function version_newer(remote, current)
 	return false
 end
 
+local function parse_manifest(manifest)
+	if type(manifest) ~= "table" then return nil end
+	if not (tostring(manifest.version or ""):match("^%d+[%d%.%-]*$") and
+	   tostring(manifest.ipk_url or ""):match("^https?://[%w%._~:/%?#%[%]@!$&'()*+,;=%%%-]+$") and
+	   tostring(manifest.sha256 or ""):match("^[a-fA-F0-9]+$") and #tostring(manifest.sha256) == 64) then
+		return nil
+	end
+	local history, seen = {}, {}
+	if type(manifest.history) == "table" then
+		for _, item in ipairs(manifest.history) do
+			if type(item) == "table" and tostring(item.version or ""):match("^%d+[%d%.%-]*$") and
+			   tostring(item.ipk_url or ""):match("^https?://[%w%._~:/%?#%[%]@!$&'()*+,;=%%%-]+$") and
+			   tostring(item.sha256 or ""):match("^[a-fA-F0-9]+$") and #tostring(item.sha256) == 64 and
+			   not seen[item.version] then
+				seen[item.version] = true
+				history[#history + 1] = {
+					version=item.version, ipk_url=item.ipk_url,
+					sha256=item.sha256:lower(), notes=tostring(item.notes or "")
+				}
+			end
+		end
+	end
+	table.sort(history, function(a, b) return version_newer(a.version, b.version) end)
+	return {
+		version=manifest.version, ipk_url=manifest.ipk_url, sha256=manifest.sha256:lower(),
+		notes=manifest.notes or "", published_at=manifest.published_at or "", history=history
+	}
+end
+
 local function fetch_update_manifest()
 	local path = "/tmp/passwall-device-update-" .. tostring(nixio.getpid()) .. ".json"
 	for _, url in ipairs(UPDATE_MANIFESTS) do
 		os.remove(path)
 		local rc = sys.call("curl -4 -fsSL --connect-timeout 5 --max-time 12 " .. shellquote(url) .. " -o " .. shellquote(path) .. " 2>/dev/null")
 		if rc == 0 then
-			local manifest = jsonc.parse(read_file(path) or "")
+			local manifest = parse_manifest(jsonc.parse(read_file(path) or ""))
 			os.remove(path)
-			if type(manifest) == "table" and tostring(manifest.version or ""):match("^%d+[%d%.%-]*$") and
-			   tostring(manifest.ipk_url or ""):match("^https?://[%w%._~:/%?#%[%]@!$&'()*+,;=%%%-]+$") and
-			   tostring(manifest.sha256 or ""):match("^[a-fA-F0-9]+$") and #tostring(manifest.sha256) == 64 then
+			if manifest then
 				manifest.source = url
 				return manifest
 			end
@@ -1100,8 +1175,26 @@ local function check_update()
 	return {
 		ok=true, current=current, latest=manifest.version,
 		available=version_newer(manifest.version, current),
-		notes=manifest.notes or "", published_at=manifest.published_at or "", source=manifest.source
+		notes=manifest.notes or "", published_at=manifest.published_at or "", source=manifest.source,
+		history=manifest.history or {}
 	}
+end
+
+-- 下载、校验 SHA-256 并 opkg 安装指定包；成功返回 nil，失败返回错误信息与详情
+local function install_package(ipk_url, expected_sha256, log_path, extra_flags)
+	local ipk = "/tmp/passwall-device-update-" .. tostring(nixio.getpid()) .. ".ipk"
+	os.remove(ipk)
+	local rc = sys.call("curl -4 -fsSL --connect-timeout 8 --max-time 120 " .. shellquote(ipk_url) .. " -o " .. shellquote(ipk) .. " 2>" .. shellquote(log_path))
+	if rc ~= 0 then os.remove(ipk); return "更新包下载失败", trim(read_file(log_path) or "") end
+	local actual = trim(sys.exec("sha256sum " .. shellquote(ipk) .. " 2>/dev/null | cut -d' ' -f1") or ""):lower()
+	if actual ~= expected_sha256:lower() then
+		os.remove(ipk)
+		return "更新包校验失败，已拒绝安装", ""
+	end
+	rc = sys.call("opkg install " .. (extra_flags or "") .. " " .. shellquote(ipk) .. " >" .. shellquote(log_path) .. " 2>&1")
+	os.remove(ipk)
+	if rc ~= 0 then return "更新安装失败", trim(read_file(log_path) or "") end
+	return nil
 end
 
 local function install_update()
@@ -1111,21 +1204,34 @@ local function install_update()
 	if not version_newer(manifest.version, current) then
 		return {ok=false, current=current, latest=manifest.version, error="当前已经是最新版本"}
 	end
-	local ipk = "/tmp/passwall-device-update-" .. tostring(nixio.getpid()) .. ".ipk"
-	local log = "/tmp/passwall-device-update.log"
-	os.remove(ipk)
-	local rc = sys.call("curl -4 -fsSL --connect-timeout 8 --max-time 120 " .. shellquote(manifest.ipk_url) .. " -o " .. shellquote(ipk) .. " 2>" .. shellquote(log))
-	if rc ~= 0 then os.remove(ipk); return {ok=false, error="更新包下载失败", details=trim(read_file(log) or "")} end
-	local actual = trim(sys.exec("sha256sum " .. shellquote(ipk) .. " 2>/dev/null | cut -d' ' -f1") or ""):lower()
-	if actual ~= tostring(manifest.sha256):lower() then
-		os.remove(ipk)
-		return {ok=false, error="更新包校验失败，已拒绝安装"}
+	local install_error, details = install_package(manifest.ipk_url, manifest.sha256, "/tmp/passwall-device-update.log")
+	if install_error then
+		return {ok=false, current=current, latest=manifest.version, error=install_error, details=details}
 	end
-	rc = sys.call("opkg install " .. shellquote(ipk) .. " >" .. shellquote(log) .. " 2>&1")
-	os.remove(ipk)
-	if rc ~= 0 then return {ok=false, error="更新安装失败", details=trim(read_file(log) or "")} end
 	local installed = trim(read_file("/usr/share/passwall-device/VERSION") or current)
 	return {ok=true, previous=current, version=installed, message="更新完成，页面即将刷新"}
+end
+
+local function rollback(version)
+	version = trim(version)
+	local current = trim(read_file("/usr/share/passwall-device/VERSION") or "0.0.0")
+	if version == "" then return {ok=false, current=current, error="请选择要回退的版本"} end
+	if version == current then return {ok=false, current=current, error="该版本就是当前版本，无需回退"} end
+	local manifest, err = fetch_update_manifest()
+	if not manifest then return {ok=false, current=current, error=err} end
+	local target
+	for _, item in ipairs(manifest.history or {}) do
+		if item.version == version then target = item; break end
+	end
+	if not target then
+		return {ok=false, current=current, latest=manifest.version, error="更新清单中没有版本 " .. version .. " 的回退包"}
+	end
+	local install_error, details = install_package(target.ipk_url, target.sha256, "/tmp/passwall-device-rollback.log", "--force-downgrade")
+	if install_error then
+		return {ok=false, current=current, version=version, error=install_error, details=details}
+	end
+	local installed = trim(read_file("/usr/share/passwall-device/VERSION") or current)
+	return {ok=true, previous=current, version=installed, message="已回退到 " .. installed .. "，页面即将刷新"}
 end
 
 local action=arg[1] or "status"
@@ -1146,6 +1252,8 @@ elseif action=="delete-codes" then reply(delete_codes(arg[2] or ""))
 elseif action=="update-binding" then reply(update_binding(arg[2] or "",arg[3] or ""))
 elseif action=="check-update" then reply(check_update())
 elseif action=="install-update" then reply(install_update())
+elseif action=="rollback" then reply(rollback(arg[2] or ""))
+elseif action=="reset" then reply(reset_all())
 elseif action=="wifi-macs" then reply(wifi_mac_list())
 elseif action=="migrate" then reply(migrate_acls())
 elseif action=="prune-offline" then reply(prune_offline())

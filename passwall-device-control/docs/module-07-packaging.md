@@ -14,6 +14,8 @@
 - `app.lua`：`migrate_codes`(584)、`migrate_acls`(629)、`cleanup_acls`(718)
 - `VERSION`（构建读版本号）
 
+> 说明：`reset_all`（一键恢复初始配置）复用卸载时的清理逻辑，但保留配置文件本身，仅在页面/API 里清空托管数据并把 PassWall 恢复为 `previous_*` 快照状态。Windows 本地可用 `tools/build_ipk.py` 复现 `build-openwrt.sh` 的打包过程（含文件权限位）。
+
 ## 构建（`build-openwrt.sh`）
 
 1. 读 `VERSION`，输出 `dist/luci-app-passwall-device_<VERSION>_all.ipk`。
@@ -52,6 +54,7 @@
 - 改备份路径或备份内容（`install.sh`/`uninstall.sh`）。
 - 改权限位（三个地方都改：build、install、postinst）。
 - 改卸载时对 PassWall 的恢复策略。
+- 发布新版本时同步 `README.md` 历史版本列表与 `update.json` 的 `history`（见 M6）。
 
 ## 在新对话中的开场白
 

@@ -57,6 +57,8 @@
 | `unbind(-many)` | id_text | `unbind_many` | M3 |
 | `test-node` | node_id | `test_node` | M4 |
 | `check-update` / `install-update` | — | 对应函数 | M6 |
+| `rollback` | version | `rollback` | M6 |
+| `reset` | — | `reset_all` | M3/M7 |
 | `migrate` | — | `migrate_acls` | M7 |
 | `prune-offline` | — | `prune_offline` | M5 |
 | `cleanup-acls` | — | `cleanup_acls` | M7 |
@@ -82,6 +84,8 @@
 | `POST edit-binding` | binding_id,remark | `update-binding` |
 | `GET  version` | — | `check-update` |
 | `POST update` | — | `install-update` |
+| `POST rollback` | version | `rollback` |
+| `POST reset` | — | `reset` |
 
 门户入口（免登录，`portal.sysauth=false`）：
 - `GET  /pwc` → 渲染 `portal.htm`

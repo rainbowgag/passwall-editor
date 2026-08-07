@@ -63,6 +63,8 @@ function index()
 	entry({"admin", "services", "passwall_device", "edit-binding"}, call("api_edit_binding")).leaf = true
 	entry({"admin", "services", "passwall_device", "version"}, call("api_version")).leaf = true
 	entry({"admin", "services", "passwall_device", "update"}, call("api_update")).leaf = true
+	entry({"admin", "services", "passwall_device", "rollback"}, call("api_rollback")).leaf = true
+	entry({"admin", "services", "passwall_device", "reset"}, call("api_reset")).leaf = true
 
 	local portal = entry({"pwc"}, template("passwall_device/portal"))
 	portal.sysauth = false
@@ -116,6 +118,8 @@ function api_delete_codes() json(run("delete-codes", {http.formvalue("code_ids")
 function api_edit_binding() json(run("update-binding", {http.formvalue("binding_id") or "", http.formvalue("remark") or ""})) end
 function api_version() json(run("check-update")) end
 function api_update() json(run("install-update")) end
+function api_rollback() json(run("rollback", {http.formvalue("version") or ""})) end
+function api_reset() json(run("reset")) end
 
 function portal_login()
 	local code = http.formvalue("code") or ""
