@@ -37,7 +37,6 @@ local function run(action, args)
 end
 
 function index()
-	-- 不使用模块顶层 local（LuCI 字节码缓存还原后 upvalue 会丢失）
 	local cfg = io.open("/etc/config/passwall_device", "r")
 	if not cfg then return end
 	cfg:close()
@@ -46,8 +45,6 @@ function index()
 	page.dependent = true
 	page.acl_depends = { "luci-app-passwall-device" }
 
-	-- 单级子入口，避免 iStoreOS LuCI 对多级 api/* 路径触发
-	-- "Access Violation: has no parent node"（中间节点 auto=true 与父页面 dependent=true 冲突）
 	entry({"admin", "services", "passwall_device", "status"}, call("api_status")).leaf = true
 	entry({"admin", "services", "passwall_device", "import"}, call("api_import")).leaf = true
 	entry({"admin", "services", "passwall_device", "toggle"}, call("api_toggle")).leaf = true
@@ -61,6 +58,8 @@ function index()
 	entry({"admin", "services", "passwall_device", "add-codes"}, call("api_add_codes")).leaf = true
 	entry({"admin", "services", "passwall_device", "delete-codes"}, call("api_delete_codes")).leaf = true
 	entry({"admin", "services", "passwall_device", "edit-binding"}, call("api_edit_binding")).leaf = true
+	entry({"admin", "services", "passwall_device", "set-front"}, call("api_set_front")).leaf = true
+	entry({"admin", "services", "passwall_device", "set-front-many"}, call("api_set_front_many")).leaf = true
 	entry({"admin", "services", "passwall_device", "version"}, call("api_version")).leaf = true
 	entry({"admin", "services", "passwall_device", "update"}, call("api_update")).leaf = true
 	entry({"admin", "services", "passwall_device", "rollback"}, call("api_rollback")).leaf = true
@@ -116,6 +115,12 @@ function api_edit_code() json(run("update-code", {http.formvalue("code_id") or "
 function api_add_codes() json(run("add-codes", {http.formvalue("node_ids") or "", http.formvalue("count") or "1"})) end
 function api_delete_codes() json(run("delete-codes", {http.formvalue("code_ids") or ""})) end
 function api_edit_binding() json(run("update-binding", {http.formvalue("binding_id") or "", http.formvalue("remark") or ""})) end
+function api_set_front() json(run("set-front", {http.formvalue("node_id") or "", http.formvalue("front") or ""})) end
+function api_set_front_many()
+	local ids = http.formvalue("node_ids") or ""
+	if #ids > 65535 then return json({ok=false, error="批量节点参数过长"}) end
+	json(run("set-front-many", {ids, http.formvalue("front") or ""}))
+end
 function api_version() json(run("check-update")) end
 function api_update() json(run("install-update")) end
 function api_rollback() json(run("rollback", {http.formvalue("version") or ""})) end
