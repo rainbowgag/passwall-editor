@@ -83,6 +83,44 @@ local function new_section(c, config, section_type, prefix, values)
 	return id
 end
 
+-- 固件兼容：部分固件（如 Kwrt）的 uci.cursor():add(config,type,name) 会忽略
+-- 命名参数、创建成匿名 section，导致 PassWall 生成器变量名含 @acl_rule[N]，
+-- source 时报 command not found / bad substitution、nftables 代理规则不生成、
+-- 设备流量全直连。统一改用 c:set(config,name,type) 显式创建命名 ACL（实测可靠）。
+local function add_named_acl(c, name)
+	c:set(PW, name, "acl_rule")
+	return name
+end
+
+-- 自动修复历史遗留的匿名托管 ACL：pwc_managed=1 且为匿名的 section
+-- 直接 rename 成 pwc_acl_<pwc_binding_id>（幂等，status 轮询时自动执行）。
+local function repair_anonymous_acls(c)
+	local fixed = 0
+	c:foreach(PW, "acl_rule", function(s)
+		if s.pwc_managed == "1" and s[".anonymous"] then
+			local binding_id = s.pwc_binding_id or ""
+			if binding_id ~= "" and binding_id:match("^[%w_%-]+$") then
+				pcall(function() c:rename(PW, s[".name"], "pwc_acl_" .. binding_id) end)
+				fixed = fixed + 1
+			end
+		end
+	end)
+	if fixed > 0 then
+		c:commit(PW)
+		sys.call("logger -t passwall-device " .. shellquote("已自动修复 " .. fixed .. " 个匿名 ACL 为命名"))
+	end
+	return fixed
+end
+
+-- 踢掉无线客户端：绑定成功后触发设备重连，让手机重新完成连通性检测。
+-- 否则首次连接会被手机判定为"该热点没有加入互联网"（未放行时防火墙只允许
+-- 访问认证页）；重连后设备已在放行名单，检测通过即可正常联网。
+local function kick_wifi_client(mac)
+	mac = tostring(mac or ""):lower()
+	if mac == "" or not mac:match("^[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:") then return end
+	sys.call("ubus list 2>/dev/null | grep -oE '^hostapd\\.[^ ]+$' | while read o; do ubus call $o del_client '{\"addr\":\"" .. mac .. "\",\"reason\":4,\"deauth\":true}' >/dev/null 2>&1; done; true")
+end
+
 local function read_file(path)
 	local f = io.open(path, "r")
 	if not f then return nil end
@@ -196,6 +234,7 @@ end
 
 local function list_status()
 	local c = uci.cursor()
+	repair_anonymous_acls(c)
 	local nodes = {}
 	local bindings = {}
 	local binding_groups = {}
@@ -658,9 +697,10 @@ local function migrate_acls()
 			-- bad substitution，导致节点配置生成失败、设备全直连；统一转成命名 section。
 			if acl[".anonymous"] then
 				local old_name = acl[".name"]
-				local new_name = c:add(PW, "acl_rule", "pwc_acl_" .. binding[".name"])
-				copy_acl_options(c, acl, new_name)
-				c:delete(PW, old_name)
+				-- 部分固件（Kwrt）的 c:add(config,type,name) 会忽略命名参数仍创建匿名，
+				-- 因此直接 c:rename（实测可用），避免"新建命名→删旧"失效。
+				local new_name = "pwc_acl_" .. binding[".name"]
+				pcall(function() c:rename(PW, old_name, new_name) end)
 				acl = c:get_all(PW, new_name)
 				migrated = migrated + 1
 			end
@@ -802,6 +842,7 @@ local function bind(ip, code)
 		sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
 		sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
 		sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1 || true")
+		kick_wifi_client(mac_d)
 		local _,_,rate_path_d=rate_state(ip,false); os.remove(rate_path_d)
 		sys.call("logger -t passwall-device "..shellquote("直连绑定成功 mac="..mac_d.." code="..code))
 		return {ok=true, message="绑定成功（直连）", node="直连", code=code, kicked=old_code_d and old_code_d.mac or nil}
@@ -822,7 +863,7 @@ local function bind(ip, code)
 		mac=mac, ip=ip, hostname=hostname, node_id=meta.passwall_id, code_id=code_meta[".name"], code=code, acl_id="",
 		state="pending", wireless="1", bound_at=os.date("%Y-%m-%d %H:%M:%S")
 	})
-	local acl = c:add(PW, "acl_rule", "pwc_acl_" .. bid)
+	local acl = add_named_acl(c, "pwc_acl_" .. bid)
 	c:set(PW, acl, "enabled", "1")
 	c:set(PW, acl, "remarks", "PWC " .. hostname .. " " .. mac)
 	c:set(PW, acl, "sources", mac .. " " .. ip)
@@ -859,22 +900,19 @@ local function bind(ip, code)
 	c:commit(PW); c:commit(CFG); c:commit("dhcp")
 	sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
 	sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
-	local rc = sys.call("/etc/init.d/passwall restart >/tmp/pwc-passwall-apply.log 2>&1")
-	if rc ~= 0 then
-		local rollback = uci.cursor()
-		local b = rollback:get_all(CFG, bid)
-		remove_binding(rollback, b)
-		rollback:commit(PW); rollback:commit(CFG)
-		sys.call("/etc/init.d/passwall restart >/dev/null 2>&1")
-		return {ok=false, error="PassWall 应用失败，设备仍保持断网", details=trim(read_file("/tmp/pwc-passwall-apply.log") or "")}
-	end
+	-- 异步应用 PassWall：全量 restart 实测约 13 秒，同步等待会让手机端
+	-- "正在配置网络"卡十几秒。改为后台执行、立即返回绑定成功，代理规则
+	-- 约 10 秒后生效（生效前设备短暂直连，不影响国内网络）。
+	sys.call("(sleep 1; /etc/init.d/passwall restart >/tmp/pwc-passwall-apply.log 2>&1) >/dev/null 2>&1 &")
 	local active = uci.cursor()
 	active:set(CFG, bid, "state", "active")
 	active:commit(CFG)
 	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
+	-- 绑定成功后踢设备重连：让手机重新完成连通性检测，避免"热点无互联网"提示
+	kick_wifi_client(mac)
 	local _,_,rate_path=rate_state(ip,false); os.remove(rate_path)
-	sys.call("logger -t passwall-device "..shellquote("绑定成功 mac="..mac.." node="..(nodes[meta.passwall_id].remarks or meta.passwall_id)))
-	return {ok=true, message="绑定成功", node=nodes[meta.passwall_id].remarks or meta.passwall_id, code=code, kicked=old_code and old_code.mac or nil}
+	sys.call("logger -t passwall-device "..shellquote("绑定成功 mac="..mac.." node="..(nodes[meta.passwall_id].remarks or meta.passwall_id).."（后台生效）"))
+	return {ok=true, message="绑定成功，代理配置正在后台生效（约10秒）", node=nodes[meta.passwall_id].remarks or meta.passwall_id, code=code, async=true, kicked=old_code and old_code.mac or nil}
 end
 
 local function toggle(enabled)
