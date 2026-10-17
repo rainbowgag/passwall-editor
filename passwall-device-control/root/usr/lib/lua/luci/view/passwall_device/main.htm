@@ -1,9 +1,11 @@
 <%+header%>
 <style>
-.pwc-wrap{max-width:1200px;margin:0 auto}.pwc-card{background:var(--background-color-high,#fff);border:1px solid #ddd;border-radius:8px;padding:16px;margin:14px 0}.pwc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pwc-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwc-title{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.pwc-title h3{margin:0}.pwc-title-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwc-search{width:310px;max-width:70vw}.pwc-input{box-sizing:border-box;width:100%;padding:9px;border:1px solid #bbb;border-radius:5px}.pwc-small{width:110px}.pwc-code{font-family:monospace}.pwc-muted{color:#777}.pwc-good{color:#16803c}.pwc-bad{color:#c62828}.pwc-table{width:100%;border-collapse:collapse}.pwc-table th,.pwc-table td{padding:8px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}.pwc-table-wrap{overflow:auto}.pwc-actions button{margin:2px}.pwc-editable{cursor:pointer;border-bottom:1px dashed #777}.pwc-editable:hover{color:#4b65d1}.pwc-check{width:18px;height:18px}.pwc-version{margin-left:auto}.pwc-code-item{display:inline-flex;align-items:center;gap:5px;margin:2px 5px 2px 0;padding:3px 7px;border-radius:12px;background:#eef1f5}.pwc-code-item button{border:0;background:transparent;color:#c62828;cursor:pointer;padding:0 2px;font-size:16px}.pwc-code-state{font-size:11px}.pwc-code-online{background:#e4f6e9}.pwc-code-offline{background:#fdeaea}@media(max-width:760px){.pwc-grid{grid-template-columns:1fr}.pwc-table{font-size:12px}.pwc-version{margin-left:0}.pwc-search{width:100%}}
+.pwc-wrap{max-width:1200px;margin:0 auto}.pwc-card{background:var(--background-color-high,#fff);border:1px solid #ddd;border-radius:8px;padding:16px;margin:14px 0}.pwc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pwc-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwc-title{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.pwc-title h3{margin:0}.pwc-title-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwc-search{width:310px;max-width:70vw}.pwc-input{box-sizing:border-box;width:100%;padding:9px;border:1px solid #bbb;border-radius:5px}.pwc-small{width:110px}.pwc-code{font-family:monospace}.pwc-muted{color:#777}.pwc-good{color:#16803c}.pwc-bad{color:#c62828}.pwc-table{width:100%;border-collapse:collapse}.pwc-table th,.pwc-table td{padding:8px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}.pwc-table-wrap{overflow:auto}.pwc-actions button{margin:2px}.pwc-editable{cursor:pointer;border-bottom:1px dashed #777}.pwc-editable:hover{color:#4b65d1}.pwc-check{width:18px;height:18px}.pwc-version{margin-left:auto}.pwc-code-item{display:inline-flex;align-items:center;gap:5px;margin:2px 5px 2px 0;padding:3px 7px;border-radius:12px;background:#eef1f5}.pwc-code-item button{border:0;background:transparent;color:#c62828;cursor:pointer;padding:0 2px;font-size:16px}.pwc-code-state{font-size:11px}.pwc-code-online{background:#e4f6e9}.pwc-code-offline{background:#fdeaea}.pwc-tabs{display:flex;gap:6px;border-bottom:2px solid #ddd;margin-bottom:8px}.pwc-tab{padding:8px 18px;border:1px solid #ddd;border-bottom:0;border-radius:6px 6px 0 0;background:#f0f1f3;cursor:pointer;font-size:14px}.pwc-tab.active{background:var(--background-color-high,#fff);border-top:2px solid #4b65d1;border-left:1px solid #4b65d1;border-right:1px solid #4b65d1;font-weight:700}.pwc-page{display:none}.pwc-page.active{display:block}@media(max-width:760px){.pwc-grid{grid-template-columns:1fr}.pwc-table{font-size:12px}.pwc-version{margin-left:0}.pwc-search{width:100%}}
 </style>
 <div class="pwc-wrap">
  <h2>PassWall 设备口令</h2>
+ <div class="pwc-tabs"><button class="pwc-tab active" data-tab="main" type="button">主页</button><button class="pwc-tab" data-tab="logs" type="button">日志</button></div>
+ <div class="pwc-page active" id="page-main">
  <div class="pwc-card">
   <div class="pwc-row"><strong>服务状态：</strong><span id="service_state">读取中</span><button id="toggle_btn" class="btn cbi-button cbi-button-action">启用认证服务</button><button id="refresh_btn" class="btn cbi-button">刷新</button><span class="pwc-version">当前版本：<strong id="current_version">--</strong>　最新版本：<strong id="latest_version">未检测</strong></span><button id="check_update_btn" class="btn cbi-button">检查更新</button><button id="update_btn" class="btn cbi-button cbi-button-action" style="display:none">更新</button><select id="rollback_ver" class="pwc-input pwc-small" style="display:none" title="选择要回退到的历史版本"></select><button id="rollback_btn" class="btn cbi-button cbi-button-negative" style="display:none">回退到该版本</button></div>
   <p id="update_notes" class="pwc-muted" style="display:none"></p>
@@ -15,16 +17,30 @@
    <div><textarea id="links" class="pwc-input pwc-code" rows="10" placeholder="可粘贴混杂文本，自动提取 vmess://、vless://、trojan://、trojan-go://、ss://、socks://、socks5:// 或 IP:端口:用户名:密码&#10;&#10;链接末尾加 ---口令1 口令2 口令3 可为该节点批量创建指定口令，如：&#10;vless://...#节点备注---A101 A102 A103"></textarea></div>
    <div>
     <label>节点名称前缀（留空保留链接名称）</label><input id="prefix" class="pwc-input" placeholder="例如：德国">
-    <div class="pwc-row" style="margin-top:10px"><label>名称起始</label><input id="start" class="pwc-input pwc-small" type="number" value="1"><label>口令前缀</label><input id="code_prefix" class="pwc-input pwc-small"><label>口令起始</label><input id="code_start" class="pwc-input pwc-small" type="number" value="1"><label>位数</label><input id="code_width" class="pwc-input pwc-small" type="number" value="3" min="1" max="12"><label>每节点口令数</label><input id="code_count" class="pwc-input pwc-small" type="number" value="1" min="1" max="100"></div>
+    <div class="pwc-row" style="margin-top:10px"><label>名称起始</label><input id="start" class="pwc-input pwc-small" type="number" value="1"><label>口令前缀</label><input id="code_prefix" class="pwc-input pwc-small"><label>口令起始</label><input id="code_start" class="pwc-input pwc-small" type="number" value="1"><label>每节点口令数</label><input id="code_count" class="pwc-input pwc-small" type="number" value="1" min="1" max="100"></div>
     <p><button id="import_btn" class="btn cbi-button cbi-button-action">提取并导入</button></p>
     <pre id="import_result" class="pwc-muted"></pre>
    </div>
   </div>
  </div>
- <div class="pwc-card"><div class="pwc-title"><h3>节点与口令</h3><div class="pwc-title-tools"><input id="node_search" class="pwc-input pwc-search" placeholder="搜索节点名称或口令"><button id="test_nodes_btn" class="btn cbi-button">检测所选节点</button><button id="add_codes_btn" class="btn cbi-button cbi-button-action">为所选节点添加口令</button><button id="delete_nodes_btn" class="btn cbi-button cbi-button-negative">批量删除</button></div></div><div class="pwc-table-wrap"><table class="pwc-table"><thead><tr><th><input id="nodes_all" class="pwc-check" type="checkbox" title="全选当前结果"></th><th>节点（点击修改）</th><th>协议/地址</th><th>口令（点击修改）</th><th>状态 / 连通性</th><th>操作</th></tr></thead><tbody id="nodes_body"></tbody></table></div></div>
+ <div class="pwc-card"><div class="pwc-title"><h3>节点与口令</h3><div class="pwc-title-tools"><input id="node_search" class="pwc-input pwc-search" placeholder="搜索节点名称或口令"><button id="test_nodes_btn" class="btn cbi-button">检测所选节点</button><button id="test_all_btn" class="btn cbi-button cbi-button-action">检测全部节点</button><button id="front_many_btn" class="btn cbi-button">批量设前置代理</button><button id="add_codes_btn" class="btn cbi-button cbi-button-action">为所选节点添加口令</button><button id="delete_nodes_btn" class="btn cbi-button cbi-button-negative">批量删除</button></div></div><div class="pwc-table-wrap"><table class="pwc-table"><thead><tr><th><input id="nodes_all" class="pwc-check" type="checkbox" title="全选当前结果"></th><th>节点（点击修改）</th><th>协议/地址</th><th>口令（点击修改）</th><th>状态 / 连通性</th><th>操作</th></tr></thead><tbody id="nodes_body"></tbody></table></div></div>
  <div class="pwc-card"><div class="pwc-title"><h3>设备绑定</h3><div class="pwc-title-tools"><input id="binding_search" class="pwc-input pwc-search" placeholder="搜索口令、节点、设备名称、MAC 或 IP"><button id="unbind_many_btn" class="btn cbi-button cbi-button-negative">批量解绑并断网</button></div></div><div class="pwc-table-wrap"><table class="pwc-table"><thead><tr><th><input id="bindings_all" class="pwc-check" type="checkbox" title="全选当前结果"></th><th>设备（点击备注）</th><th>MAC / IP</th><th>节点 / 口令</th><th>时间</th><th>操作</th></tr></thead><tbody id="bindings_body"></tbody></table></div></div>
+ </div>
+ <div class="pwc-page" id="page-logs">
  <div class="pwc-card"><div class="pwc-title"><h3>危险操作</h3></div><p class="pwc-muted">恢复初始配置会删除所有节点、口令、设备绑定和相关规则，并停用认证服务，方便重新配置。此操作不可撤销。</p><button id="reset_btn" class="btn cbi-button cbi-button-negative">恢复初始配置</button></div>
  <div class="pwc-card"><h3>最近日志</h3><pre id="logs" class="pwc-muted pwc-code" style="white-space:pre-wrap"></pre></div>
+ </div>
+ <div id="front_modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:99;align-items:center;justify-content:center;">
+  <div style="background:#fff;padding:16px;border-radius:8px;min-width:320px;max-width:90vw;box-shadow:0 4px 20px rgba(0,0,0,.2);">
+   <div id="front_modal_title" style="font-weight:700;margin-bottom:10px;"></div>
+   <input id="front_search" class="pwc-input" placeholder="输入节点名称快速搜索…" style="width:100%;margin-bottom:8px;">
+   <select id="front_modal_select" class="pwc-input" style="width:100%;margin-bottom:12px;max-height:280px;"></select>
+   <div style="display:flex;gap:8px;justify-content:flex-end;">
+    <button id="front_modal_cancel" class="btn cbi-button" type="button">取消</button>
+    <button id="front_modal_ok" class="btn cbi-button cbi-button-action" type="button">确定</button>
+   </div>
+  </div>
+ </div>
 </div>
 <script>
 (function(){
@@ -44,10 +60,11 @@
   const nodes=(state.nodes||[]).filter(n=>!nq||norm(n.remarks+' '+(n.codes||[]).map(c=>c.value).join(' ')).includes(nq));
   const bindings=(state.bindings||[]).filter(b=>!bq||norm([b.hostname,b.system_hostname,b.remark,b.mac,b.ip,b.node,b.code].join(' ')).includes(bq));
   document.getElementById('nodes_all').checked=false;document.getElementById('bindings_all').checked=false;
-  document.getElementById('nodes_body').innerHTML=nodes.map(n=>`<tr><td><input class="pwc-check node-check" type="checkbox" value="${esc(n.id)}"></td><td><span class="pwc-editable" title="点击修改节点名称" data-node-name="${esc(n.id)}" data-name="${esc(n.remarks)}">${esc(n.remarks)}</span></td><td>${esc(n.protocol||n.type)}<br><span class="pwc-muted">${esc(n.address)}:${esc(n.port)}</span></td><td>${(n.codes||[]).map(c=>codeHtml(c,n)).join('')||'<span class="pwc-bad">无口令</span>'}</td><td>${nodeStatus(n)}</td><td class="pwc-actions"><button class="btn cbi-button" data-test="${esc(n.id)}">检测</button><button class="btn cbi-button cbi-button-negative" data-delete="${esc(n.id)}" data-name="${esc(n.remarks)}">删除</button></td></tr>`).join('')||'<tr><td colspan="6" class="pwc-muted">没有匹配的节点</td></tr>';
+  document.getElementById('nodes_body').innerHTML=nodes.map(n=>`<tr><td><input class="pwc-check node-check" type="checkbox" value="${esc(n.id)}"></td><td><span class="pwc-editable" title="点击修改节点名称" data-node-name="${esc(n.id)}" data-name="${esc(n.remarks)}">${esc(n.remarks)}</span></td><td>${esc(n.protocol||n.type)}<br><span class="pwc-muted">${esc(n.address)}:${esc(n.port)}</span>${n.front_remark?`<br><span class="pwc-muted" title="该节点经此前置代理中转">前置：${esc(n.front_remark)}</span>`:''}</td><td>${(n.codes||[]).map(c=>codeHtml(c,n)).join('')||'<span class="pwc-bad">无口令</span>'}</td><td>${nodeStatus(n)}</td><td class="pwc-actions"><button class="btn cbi-button" data-test="${esc(n.id)}">检测</button><button class="btn cbi-button" data-front="${esc(n.id)}" data-name="${esc(n.remarks)}" title="设置该节点的前置代理节点">前置</button><button class="btn cbi-button cbi-button-negative" data-delete="${esc(n.id)}" data-name="${esc(n.remarks)}">删除</button></td></tr>`).join('')||'<tr><td colspan="6" class="pwc-muted">没有匹配的节点</td></tr>';
   document.getElementById('bindings_body').innerHTML=bindings.map(b=>`<tr><td><input class="pwc-check binding-check" type="checkbox" value="${esc(b.id)}"></td><td><span class="pwc-editable" title="点击设置设备备注；留空恢复系统名称" data-binding-edit="${esc(b.id)}" data-remark="${esc(b.remark)}">${esc(b.hostname)}</span></td><td><code>${esc(b.mac)}</code><br>${esc(b.ip)}</td><td>${esc(b.node)}<br><code>${esc(b.code)}</code>　${b.online?'<span class="pwc-good">在线</span>':'<span class="pwc-bad">离线（保留绑定）</span>'}</td><td>${esc(b.bound_at)}</td><td><button class="btn cbi-button cbi-button-negative" data-unbind="${esc(b.id)}">解绑并断网</button></td></tr>`).join('')||'<tr><td colspan="6" class="pwc-muted">没有匹配的绑定设备</td></tr>';
   document.getElementById('logs').textContent=state.logs||'暂无日志';
   document.querySelectorAll('[data-test]').forEach(x=>x.onclick=async()=>{x.disabled=true;const r=await post('test',{node_id:x.dataset.test});alert(r.message||r.error||'完成');x.disabled=false;load()});
+  document.querySelectorAll('[data-front]').forEach(x=>x.onclick=()=>openFrontPicker('设置节点“'+x.dataset.name+'”的前置代理',[x.dataset.front]));
   document.querySelectorAll('[data-node-name]').forEach(x=>x.onclick=async()=>{const remarks=prompt('请输入新的节点名称：',x.dataset.name);if(remarks===null||remarks===x.dataset.name)return;const r=await post('edit',{node_id:x.dataset.nodeName,remarks});alert(r.ok?'节点名称已更新':r.error);if(r.ok)load()});
   document.querySelectorAll('[data-code-edit]').forEach(x=>x.onclick=async()=>{const value=prompt('请输入新的口令：',x.dataset.value);if(value===null||value===x.dataset.value)return;const r=await post('edit-code',{code_id:x.dataset.codeEdit,value});alert(r.ok?'口令已更新':r.error);if(r.ok)load()});
   document.querySelectorAll('[data-code-delete]').forEach(x=>x.onclick=async e=>{e.stopPropagation();if(!confirm('确认删除口令“'+x.dataset.value+'”？如已绑定，对应设备会立即断网。'))return;const r=await post('delete-codes',{code_ids:x.dataset.codeDelete});alert(r.ok?'口令已删除':r.error);load()});
@@ -59,14 +76,56 @@
  async function checkVersion(showResult){const btn=document.getElementById('check_update_btn'),latest=document.getElementById('latest_version'),update=document.getElementById('update_btn'),notes=document.getElementById('update_notes'),rbv=document.getElementById('rollback_ver'),rbb=document.getElementById('rollback_btn');btn.disabled=true;latest.textContent='检测中…';try{const r=await fetch(base+'/version').then(x=>x.json());if(!r.ok){latest.textContent='检测失败';if(showResult)alert(r.error);return}latest.textContent=r.latest;notes.textContent=r.notes||'';notes.style.display=r.notes?'block':'none';update.style.display=r.available?'inline-block':'none';const history=(r.history||[]).filter(h=>h.version!==r.current);rbv.innerHTML='';history.forEach(h=>{const o=document.createElement('option');o.value=h.version;o.textContent=h.version;rbv.appendChild(o)});rbv.style.display=rbb.style.display=history.length?'inline-block':'none';if(showResult)alert(r.available?'发现新版本 '+r.latest:'当前已经是最新版本')}catch(e){latest.textContent='检测失败';if(showResult)alert('检查更新失败：'+e.message)}finally{btn.disabled=false}}
  document.getElementById('node_search').oninput=render;document.getElementById('binding_search').oninput=render;
  document.getElementById('nodes_all').onchange=function(){document.querySelectorAll('.node-check').forEach(x=>x.checked=this.checked)};document.getElementById('bindings_all').onchange=function(){document.querySelectorAll('.binding-check').forEach(x=>x.checked=this.checked)};
- document.getElementById('test_nodes_btn').onclick=async function(){const ids=checked('.node-check');if(!ids.length)return alert('请先勾选节点。');if(!confirm('将检测 '+ids.length+' 个节点，数量较多时需要几分钟。继续？'))return;this.disabled=true;this.textContent='检测中 0/'+ids.length;let cursor=0,done=0,ok=0;const worker=async()=>{while(cursor<ids.length){const id=ids[cursor++];try{const r=await post('test',{node_id:id});if(r.reachable)ok++}catch(e){}done++;this.textContent='检测中 '+done+'/'+ids.length}};await Promise.all(Array.from({length:Math.min(3,ids.length)},worker));this.disabled=false;this.textContent='检测所选节点';alert('检测完成：'+ok+' 个可用，'+(ids.length-ok)+' 个不可用。');load()};
+ async function runBatch(ids,btn,label){if(!ids.length)return alert('没有可检测的节点。');if(!confirm('将检测 '+ids.length+' 个节点，数量较多时需要几分钟。继续？'))return;btn.disabled=true;btn.textContent='检测中 0/'+ids.length;let cursor=0,done=0,ok=0;const worker=async()=>{while(cursor<ids.length){const id=ids[cursor++];try{const r=await post('test',{node_id:id});if(r.reachable)ok++}catch(e){}done++;btn.textContent='检测中 '+done+'/'+ids.length}};await Promise.all(Array.from({length:Math.min(3,ids.length)},worker));btn.disabled=false;btn.textContent=label;alert('检测完成：'+ok+' 个可用，'+(ids.length-ok)+' 个不可用。');load()}
+ document.getElementById('test_nodes_btn').onclick=function(){const ids=checked('.node-check');if(!ids.length)return alert('请先勾选节点。');runBatch(ids,this,'检测所选节点')};
+ document.getElementById('test_all_btn').onclick=function(){runBatch((state.nodes||[]).map(n=>n.id),this,'检测全部节点')};
+ let frontPending=null;
+ let frontPool=[];
+ function renderFrontOptions(){
+  const q=norm(document.getElementById('front_search').value);
+  const pool=frontPool.filter(n=>!q||norm(n.remarks).includes(q));
+  const sel=document.getElementById('front_modal_select');
+  sel.innerHTML='<option value="">（无，直连）</option>'+pool.map(n=>`<option value="${esc(n.id)}">${esc(n.remarks)}</option>`).join('');
+  if(q&&pool.length)sel.selectedIndex=1;
+ }
+ function openFrontPicker(title,nodeIds){
+  frontPending=nodeIds;
+  const exclude={};nodeIds.forEach(id=>exclude[id]=1);
+  frontPool=state.nodes.filter(n=>!exclude[n.id]);
+  document.getElementById('front_search').value='';
+  renderFrontOptions();
+  document.getElementById('front_modal_title').textContent=title;
+  document.getElementById('front_modal').style.display='flex';
+ }
+ document.getElementById('front_search').oninput=renderFrontOptions;
+ document.getElementById('front_search').onkeydown=e=>{if(e.key==='Enter')document.getElementById('front_modal_ok').click()};
+ document.getElementById('front_modal_cancel').onclick=()=>{frontPending=null;document.getElementById('front_modal').style.display='none'};
+ document.getElementById('front_modal_ok').onclick=async()=>{
+  const ids=frontPending;frontPending=null;
+  const front=document.getElementById('front_modal_select').value;
+  document.getElementById('front_modal').style.display='none';
+  if(!ids||!ids.length)return;
+  const r=ids.length===1?await post('set-front',{node_id:ids[0],front}):await post('set-front-many',{node_ids:ids.join(','),front});
+  alert(r.ok?(front?('已设置前置代理：'+(state.nodes.find(n=>n.id===front)||{}).remarks||''):'已清除前置代理（直连）'):(r.error||'操作失败'));
+  load();
+ };
+ document.getElementById('front_many_btn').onclick=()=>{
+  const ids=checked('.node-check');
+  if(!ids.length)return alert('请先勾选节点。');
+  openFrontPicker('为 '+ids.length+' 个节点设置前置代理',ids);
+ };
+ document.querySelectorAll('.pwc-tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.pwc-tab').forEach(x=>x.classList.toggle('active',x===t));
+  document.getElementById('page-main').classList.toggle('active',t.dataset.tab==='main');
+  document.getElementById('page-logs').classList.toggle('active',t.dataset.tab==='logs');
+ });
  document.getElementById('add_codes_btn').onclick=async()=>{const ids=checked('.node-check');if(!ids.length)return alert('请先勾选节点。');const count=prompt('每个所选节点新增几个口令？口令编号会从当前序号继续递增。','1');if(count===null)return;const n=Number(count);if(!Number.isInteger(n)||n<1||n>100)return alert('请输入 1 至 100 的整数。');const r=await post('add-codes',{node_ids:ids.join(','),count:n});alert(r.ok?'已为 '+r.nodes+' 个节点新增 '+r.created+' 个口令。':r.error);load()};
  document.getElementById('delete_nodes_btn').onclick=()=>deleteNodes(checked('.node-check'));document.getElementById('unbind_many_btn').onclick=()=>unbindMany(checked('.binding-check'));document.getElementById('refresh_btn').onclick=load;
  document.getElementById('toggle_btn').onclick=async()=>{if(!state.enabled&&!confirm('启用后，默认 Wi‑Fi 中尚未输入口令的设备将无法访问外网。确认启用？'))return;const r=await post('toggle',{enabled:state.enabled?'0':'1'});alert(r.ok?'状态已更新':r.error);load()};document.getElementById('check_update_btn').onclick=()=>checkVersion(true);
  document.getElementById('update_btn').onclick=async function(){if(!confirm('确认下载并安装最新版本？配置和现有设备绑定会保留。'))return;this.disabled=true;this.textContent='更新中…';try{const r=await post('update',{});alert(r.ok?'已更新到 '+r.version:r.error+(r.details?'\n'+r.details:''));if(r.ok)setTimeout(()=>location.reload(),1500)}catch(e){alert('更新请求已结束，管理服务可能正在重启；页面将自动刷新。');setTimeout(()=>location.reload(),3000)}finally{this.disabled=false;this.textContent='更新'}};
  document.getElementById('rollback_btn').onclick=async function(){const v=document.getElementById('rollback_ver').value;if(!v)return alert('请选择要回退的版本。');if(!confirm('确认回退到版本 '+v+'？\n\n将安装该版本的旧包并覆盖当前版本，配置和现有设备绑定会保留。'))return;this.disabled=true;this.textContent='回退中…';try{const r=await post('rollback',{version:v});alert(r.ok?r.message:(r.error||'回退失败')+(r.details?'\n'+r.details:''));if(r.ok)setTimeout(()=>location.reload(),1500)}catch(e){alert('回退请求已结束，页面将自动刷新。');setTimeout(()=>location.reload(),3000)}finally{this.disabled=false;this.textContent='回退到该版本'}};
  document.getElementById('reset_btn').onclick=async function(){if(!confirm('确认恢复初始配置？\n\n将删除所有节点、口令、设备绑定和相关规则，并停用认证服务。\n此操作不可撤销！'))return;if(!confirm('再次确认：所有节点和规则将被清空，方便重新配置。确定继续？'))return;this.disabled=true;this.textContent='恢复中…';try{const r=await post('reset',{});alert(r.ok?('已清空 '+r.deleted_nodes+' 个节点、'+r.deleted_codes+' 个口令、'+r.deleted_bindings+' 台设备绑定，认证服务已停用。'):(r.error||'恢复失败'));if(r.ok)setTimeout(()=>load(),600)}catch(e){alert('请求失败：'+e.message)}finally{this.disabled=false;this.textContent='恢复初始配置'}};
- document.getElementById('import_btn').onclick=async function(){this.disabled=true;const out=document.getElementById('import_result');out.textContent='正在导入…';const r=await post('import',{links:document.getElementById('links').value,prefix:document.getElementById('prefix').value,start:document.getElementById('start').value,code_prefix:document.getElementById('code_prefix').value,code_start:document.getElementById('code_start').value,code_width:document.getElementById('code_width').value,code_count:document.getElementById('code_count').value});out.textContent=r.ok?'成功导入 '+r.imported+' 个节点，创建 '+r.codes_created+' 个口令。\n'+(r.nodes||[]).map(n=>n.remarks+'  →  '+(n.codes||[]).join('、')).join('\n'):(r.error||'导入失败')+(r.details?'\n'+r.details:'');this.disabled=false;load()};
+ document.getElementById('import_btn').onclick=async function(){this.disabled=true;const out=document.getElementById('import_result');out.textContent='正在导入…';const r=await post('import',{links:document.getElementById('links').value,prefix:document.getElementById('prefix').value,start:document.getElementById('start').value,code_prefix:document.getElementById('code_prefix').value,code_start:document.getElementById('code_start').value,code_count:document.getElementById('code_count').value});out.textContent=r.ok?'成功导入 '+r.imported+' 个节点，创建 '+r.codes_created+' 个口令。\n'+(r.nodes||[]).map(n=>n.remarks+'  →  '+(n.codes||[]).join('、')).join('\n'):(r.error||'导入失败')+(r.details?'\n'+r.details:'');this.disabled=false;load()};
  load().then(()=>checkVersion(false));
 })();
 </script>
