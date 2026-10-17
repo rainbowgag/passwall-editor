@@ -653,7 +653,8 @@ local function migrate_codes(c)
 		if not valid_id(code_id or "") or not c:get(CFG, code_id, "value") or used[code_id] then code_id = nil end
 		if not code_id then
 			for _, code in ipairs(codes_for_node(c, binding.node_id)) do
-				if not used[code[".name"]] then code_id = code[".name"]; break end
+				if not used[code[".name"]] then c
+ode_id = code[".name"]; break end
 			end
 			if not code_id then
 				local prefix = c:get(CFG, "global", "code_prefix") or ""
@@ -1165,11 +1166,10 @@ local function set_front(node_id, front_id)
 	end
 	apply_front(c, node_id, front_id)
 	c:commit(PW); c:commit(CFG)
-	local rc = sys.call("/etc/init.d/passwall restart >/tmp/pwc-front.log 2>&1")
-	if rc ~= 0 then return {ok=false, error="配置已写入，但 PassWall 重载失败", details=trim(read_file("/tmp/pwc-front.log") or "")} end
+	sys.call("(sleep 1; /etc/init.d/passwall restart >/tmp/pwc-front.log 2>&1) >/dev/null 2>&1 &")
 	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1 || true")
 	sys.call("logger -t passwall-device " .. shellquote("前置代理已设置 node=" .. node_id .. " front=" .. (front_id == "" and "none" or front_id)))
-	return {ok=true, node_id=node_id, front=front_id, message=front_id == "" and "已清除前置代理（直连）" or "前置代理已设置"}
+	return {ok=true, node_id=node_id, front=front_id, message=front_id == "" and "已清除前置代理（直连）" or "已设置前置代理，代理配置正在后台生效（约10秒）", async=true}
 end
 
 local function set_front_many(id_text, front_id)
@@ -1202,11 +1202,10 @@ local function set_front_many(id_text, front_id)
 	end
 	for _, id in ipairs(ids) do apply_front(c, id, front_id) end
 	c:commit(PW); c:commit(CFG)
-	local rc = sys.call("/etc/init.d/passwall restart >/tmp/pwc-front.log 2>&1")
-	if rc ~= 0 then return {ok=false, error="配置已写入，但 PassWall 重载失败", details=trim(read_file("/tmp/pwc-front.log") or "")} end
+	sys.call("(sleep 1; /etc/init.d/passwall restart >/tmp/pwc-front.log 2>&1) >/dev/null 2>&1 &")
 	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1 || true")
 	sys.call("logger -t passwall-device " .. shellquote("前置代理批量设置 nodes=" .. table.concat(ids, ",") .. " front=" .. (front_id == "" and "none" or front_id)))
-	return {ok=true, nodes=#ids, front=front_id, message=front_id == "" and "已清除所选节点的前置代理（直连）" or "已为 " .. #ids .. " 个节点设置前置代理"}
+	return {ok=true, nodes=#ids, front=front_id, message=front_id == "" and "已清除所选节点的前置代理（直连）" or "已为 " .. #ids .. " 个节点设置前置代理，代理配置正在后台生效（约10秒）", async=true}
 end
 
 -- 一键恢复初始配置：清空全部节点、口令、设备绑定与相关规则，
