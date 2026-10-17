@@ -1,9 +1,9 @@
 {
-  "version": "0.8.4",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.4_all.ipk",
-  "sha256": "c16b6f5c7272a292d9bb056c989cec182a950f746275128cd7fa767507cf682a",
-  "published_at": "2026-10-17",
-  "notes": "修复：Kwrt 固件 c:add 命名失效导致 ACL 匿名、代理规则不生成（手机绑定仍直连）；绑定改为后台生效立即返回；绑定后自动踢设备重连解决首次连接提示无互联网。",
+  "version": "0.8.5",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.5_all.ipk",
+  "sha256": "68e6bd19ab48afc9a319231e6f69331dc045b6ec73ba1d4fe6c0d44f559fe771",
+  "published_at": "2026-10-18",
+  "notes": "修复：设置前置代理后页面无反应（PassWall 重启改后台异步生效，立即返回成功并自动刷新页面）；节点列表中的前置代理以亮蓝色加粗高亮显示，与其他文字区分。",
   "history": [
     {
       "version": "0.6.0",
@@ -70,6 +70,12 @@
       "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.3_all.ipk",
       "sha256": "6ec1d8116f7f3673d5eb6b9c0ee986978999a5d1a0476bd8cff435d1700f7580",
       "notes": "修复：绑定设备走代理的兼容性（PassWall r336 需命名 ACL section + node 字段 + mode=1），解决手机输入口令后仍走直连的 bug"
+    },
+    {
+      "version": "0.8.4",
+      "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.4_all.ipk",
+      "sha256": "c16b6f5c7272a292d9bb056c989cec182a950f746275128cd7fa767507cf682a",
+      "notes": "修复：Kwrt 固件 c:add 命名失效导致 ACL 匿名、代理规则不生成（手机绑定仍直连）；绑定改为后台生效立即返回；绑定后自动踢设备重连解决首次连接提示无互联网。"
     }
   ]
 }
