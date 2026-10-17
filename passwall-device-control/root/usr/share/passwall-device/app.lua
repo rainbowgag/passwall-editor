@@ -654,9 +654,11 @@ local function migrate_acls()
 		local matches = managed_acls_for_binding(c, binding)
 		local acl = matches[1]
 		if acl then
-			if not acl[".anonymous"] then
+			-- PassWall r336 实测：匿名 ACL section 会被 utils.sh 拼进变量名触发
+			-- bad substitution，导致节点配置生成失败、设备全直连；统一转成命名 section。
+			if acl[".anonymous"] then
 				local old_name = acl[".name"]
-				local new_name = c:add(PW, "acl_rule")
+				local new_name = c:add(PW, "acl_rule", "pwc_acl_" .. binding[".name"])
 				copy_acl_options(c, acl, new_name)
 				c:delete(PW, old_name)
 				acl = c:get_all(PW, new_name)
@@ -664,6 +666,12 @@ local function migrate_acls()
 			end
 			c:set(PW, acl[".name"], "pwc_managed", "1")
 			c:set(PW, acl[".name"], "pwc_binding_id", binding[".name"])
+			-- r336 兼容：补 node（acl_app 只读 node）与 mode=1（代理模式，否则全直连）
+			local cur_node = c:get(PW, acl[".name"], "node") or ""
+			if cur_node == "" then
+				c:set(PW, acl[".name"], "node", c:get(PW, acl[".name"], "tcp_node") or "")
+			end
+			c:set(PW, acl[".name"], "mode", "1")
 			c:set(CFG, binding[".name"], "acl_id", acl[".name"])
 		end
 		local _, created = ensure_dhcp(c, binding.mac or "", binding.ip or "", binding.hostname or "未知设备")
@@ -814,12 +822,20 @@ local function bind(ip, code)
 		mac=mac, ip=ip, hostname=hostname, node_id=meta.passwall_id, code_id=code_meta[".name"], code=code, acl_id="",
 		state="pending", wireless="1", bound_at=os.date("%Y-%m-%d %H:%M:%S")
 	})
-	local acl = c:add(PW, "acl_rule")
+	local acl = c:add(PW, "acl_rule", "pwc_acl_" .. bid)
 	c:set(PW, acl, "enabled", "1")
 	c:set(PW, acl, "remarks", "PWC " .. hostname .. " " .. mac)
 	c:set(PW, acl, "sources", mac .. " " .. ip)
 	c:set(PW, acl, "pwc_managed", "1")
 	c:set(PW, acl, "pwc_binding_id", bid)
+	-- PassWall r336 兼容（实测必需）：
+	-- 1) ACL 必须使用命名 section；匿名 @acl_rule[0] 会被 utils.sh 拼进变量名
+	--    触发 ${ACL_@acl_rule[0]_node-}: bad substitution，导致节点配置生成失败、全直连。
+	-- 2) node 字段：r336 的 acl_app() 只读取 node（非 tcp_node），缺省则 ACL 节点不加载。
+	-- 3) mode=1：mode 缺省为 0 时 nftables.sh 会把 tcp_no_redir_ports 置为
+	--    1:65535 并 unset 代理端口，ACL 全部 return 直连；mode=1 才生成代理规则。
+	c:set(PW, acl, "node", meta.passwall_id)
+	c:set(PW, acl, "mode", "1")
 	c:set(PW, acl, "tcp_node", meta.passwall_id)
 	c:set(PW, acl, "udp_node", "tcp")
 	c:set(PW, acl, "tcp_proxy_mode", "proxy")
@@ -1023,8 +1039,10 @@ local function delete_nodes(id_text, replacement)
 			c:set(CFG, b[".name"], "node_id", target[".name"])
 			c:set(CFG, b[".name"], "state", "pending")
 			for _, acl in ipairs(managed_acls_for_binding(c, b)) do
+				c:set(PW, acl[".name"], "node", target[".name"])
 				c:set(PW, acl[".name"], "tcp_node", target[".name"])
 				c:set(PW, acl[".name"], "udp_node", "tcp")
+				c:set(PW, acl[".name"], "mode", "1")
 			end
 		else remove_binding(c, b) end
 	end
