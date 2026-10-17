@@ -8,6 +8,9 @@ local nixio = require "nixio"
 local CFG = "passwall_device"
 local PW = "passwall"
 local cursor = uci.cursor()
+-- 直连节点的特殊标识：输入直连口令后设备直接联网（不走代理），
+-- 与 PassWall 节点表无关，绑定时不创建代理 ACL，仅把设备放行进白名单。
+local DIRECT_NODE_ID = "direct"
 
 local function reply(t)
 	io.write(jsonc.stringify(t or {}), "\n")
@@ -206,7 +209,7 @@ local function list_status()
 			id=s[".name"], mac=s.mac or "", ip=s.ip or "", hostname=display_name,
 			system_hostname=s.hostname or "", remark=s.remark or "",
 			node_id=s.node_id or "", code_id=s.code_id or "", code=s.code or "",
-			node=p and (p.remarks or s.node_id) or "节点已删除",
+			node=(s.node_id == DIRECT_NODE_ID and "直连") or (p and (p.remarks or s.node_id)) or "节点已删除",
 			state=s.state or "active", bound_at=s.bound_at or "", online=online
 		}
 		bindings[#bindings + 1] = item
@@ -215,6 +218,10 @@ local function list_status()
 	end)
 	c:foreach(CFG, "node", function(s)
 		local p = pw_nodes[s.passwall_id]
+		if not p and s.passwall_id == DIRECT_NODE_ID then
+			-- 直连节点不占用 PassWall 节点表，用虚拟信息展示
+			p = {remarks="直连", protocol="direct", type="direct", address="", port=""}
+		end
 		if p then
 			local group = binding_groups[s.passwall_id] or {}
 			local online_count, names = 0, {}
@@ -766,6 +773,31 @@ local function bind(ip, code)
 		sys.call("logger -t passwall-device "..shellquote("口令失败 ip="..ip))
 		return {ok=false, error="口令无效"}
 	end
+	-- 直连口令：设备直接联网（不走代理），仅放行，不创建 PassWall 代理 ACL
+	if code_meta.node_id == DIRECT_NODE_ID then
+		local limited_d, wait_d = rate_state(ip, false)
+		if limited_d then return {ok=false,error="失败次数过多，请 "..tostring(wait_d).." 秒后重试"} end
+		local mac_d = ip_to_mac(ip)
+		if not mac_d then return {ok=false, error="无法识别当前设备，请关闭随机 MAC 后重试"} end
+		mac_d = mac_d:lower()
+		local hostname_d = hostname_for(c, mac_d, ip)
+		local old_mac_d = binding_for_mac(c, mac_d)
+		local old_code_d = binding_for_code(c, code_meta[".name"])
+		if old_mac_d then remove_binding(c, old_mac_d) end
+		if old_code_d and (not old_mac_d or old_code_d[".name"] ~= old_mac_d[".name"]) then remove_binding(c, old_code_d) end
+		new_section(c, CFG, "binding", "pwc_bind_", {
+			mac=mac_d, ip=ip, hostname=hostname_d, node_id=DIRECT_NODE_ID, code_id=code_meta[".name"], code=code, acl_id="",
+			state="active", wireless="1", bound_at=os.date("%Y-%m-%d %H:%M:%S")
+		})
+		ensure_dhcp(c, mac_d, ip, hostname_d)
+		c:commit(CFG); c:commit("dhcp")
+		sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
+		sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
+		sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1 || true")
+		local _,_,rate_path_d=rate_state(ip,false); os.remove(rate_path_d)
+		sys.call("logger -t passwall-device "..shellquote("直连绑定成功 mac="..mac_d.." code="..code))
+		return {ok=true, message="绑定成功（直连）", node="直连", code=code, kicked=old_code_d and old_code_d.mac or nil}
+	end
 	local meta = metadata_for_node(c, code_meta.node_id)
 	if not meta then return {ok=false, error="口令对应的节点已经不存在"} end
 	local nodes = node_map(c)
@@ -896,6 +928,21 @@ local function add_codes(id_text, count)
 	local created = create_codes(c, ids, prefix, next_number, width, count)
 	c:commit(CFG)
 	return {ok=true, nodes=#ids, created=#created, codes=created}
+end
+
+-- 一键添加 3 个直连口令：编号从当前口令序号继续往后排，
+-- 输入后设备直接联网（不走代理），用于仅需国内直连的无线设备。
+local function add_direct_codes()
+	local c = uci.cursor()
+	if not metadata_for_node(c, DIRECT_NODE_ID) then
+		new_section(c, CFG, "node", "pwc_meta_", {passwall_id=DIRECT_NODE_ID, remarks="直连", created_at=os.date("%Y-%m-%d %H:%M:%S")})
+	end
+	local prefix = c:get(CFG, "global", "code_prefix") or ""
+	local width = tonumber((c:get(CFG, "global", "code_width"))) or 3
+	local next_number = tonumber((c:get(CFG, "global", "next_code_number"))) or 1
+	local created = create_codes(c, {DIRECT_NODE_ID}, prefix, next_number, width, 3)
+	c:commit(CFG)
+	return {ok=true, created=#created, codes=created}
 end
 
 local function delete_codes(id_text)
@@ -1198,6 +1245,16 @@ local function test_node(node_id)
 	return record_node_test(node_id, {ok=false,reachable=false,error="代理测试失败，节点将保持断网",details=details})
 end
 
+-- 国内网络连通性检测：从路由器直连百度，判断国内网络是否正常
+local function test_china()
+	local start = os.time()
+	local rc = sys.call("curl -4 -fsS --connect-timeout 4 --max-time 10 -o /dev/null http://www.baidu.com 2>/dev/null")
+	local reachable = rc == 0
+	return {ok=true, reachable=reachable, target="www.baidu.com", elapsed_seconds=os.time()-start,
+		checked_at=os.date("%Y-%m-%d %H:%M:%S"),
+		message=reachable and "国内网络正常" or "国内网络异常（无法访问百度，请检查 WAN 连通）"}
+end
+
 -- 更新源按可达性排序：GitHub raw 直连在国内网络常被掐断，
 -- 优先走社区加速镜像（内容与 raw 一致，安装包仍校验 SHA-256），
 -- 最后回退到自建 VPS。rewrite 前缀用于把清单里的 raw.githubusercontent.com
@@ -1357,6 +1414,8 @@ elseif action=="unbind-many" then reply(unbind_many(arg[2] or ""))
 elseif action=="set-front" then reply(set_front(arg[2] or "", arg[3] or ""))
 elseif action=="set-front-many" then reply(set_front_many(arg[2] or "", arg[3] or ""))
 elseif action=="test-node" then reply(test_node(arg[2] or ""))
+elseif action=="test-china" then reply(test_china())
+elseif action=="add-direct-codes" then reply(add_direct_codes())
 elseif action=="update-node" then reply(update_node(arg[2] or "",arg[3] or ""))
 elseif action=="update-code" then reply(update_code(arg[2] or "",arg[3] or ""))
 elseif action=="add-codes" then reply(add_codes(arg[2] or "",arg[3] or "1"))
