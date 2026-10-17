@@ -237,6 +237,8 @@ local function list_status()
 				codes=code_items, code_count=#code_items, bound=#group > 0, device_count=#group, online_count=online_count,
 				last_test_at=s.last_test_at or "", last_reachable=s.last_reachable or "",
 				last_exit_ip=s.last_exit_ip or "", last_test_message=s.last_test_message or "",
+				front_node_id=s.front_node_id or "",
+				front_remark=(s.front_node_id and pw_nodes[s.front_node_id] and pw_nodes[s.front_node_id].remarks) or "",
 				devices=names, online=online_count > 0, state=#group > 0 and "active" or "free"
 			}
 		end
@@ -1008,6 +1010,102 @@ local function unbind_many(id_text)
 	return {ok=rc == 0, removed=#bindings, error=rc ~= 0 and "设备已解绑，但 PassWall 重载失败" or nil}
 end
 
+-- 前置代理：把某托管节点的流量先经另一个节点中转（PassWall 节点字段
+-- chain_proxy=1 + preproxy_node=<节点id>，xray/sing-box 生成器均读取）。
+-- 从 front_id 出发沿已有前置链向上追查，若回到 node_id 则说明会形成循环。
+local function would_loop(c, node_id, front_id)
+	local seen = {}
+	local cur = front_id
+	for _ = 1, 20 do
+		if cur == node_id then return true end
+		if seen[cur] then return true end
+		seen[cur] = true
+		local fmeta = metadata_for_node(c, cur)
+		local next = fmeta and (fmeta.front_node_id or "") or ""
+		if next == "" then return false end
+		cur = next
+	end
+	return true
+end
+
+local function apply_front(c, node_id, front_id)
+	local meta = metadata_for_node(c, node_id)
+	if front_id == "" then
+		c:delete(CFG, meta[".name"], "front_node_id")
+		c:delete(PW, node_id, "chain_proxy")
+		c:delete(PW, node_id, "preproxy_node")
+	else
+		c:set(CFG, meta[".name"], "front_node_id", front_id)
+		c:set(PW, node_id, "chain_proxy", "1")
+		c:set(PW, node_id, "preproxy_node", front_id)
+	end
+end
+
+local function set_front(node_id, front_id)
+	if not valid_id(node_id) then return {ok=false, error="节点标识无效"} end
+	front_id = trim(front_id or "")
+	if front_id ~= "" and not valid_id(front_id) then return {ok=false, error="前置节点标识无效"} end
+	local c = uci.cursor()
+	local node = c:get_all(PW, node_id)
+	local meta = metadata_for_node(c, node_id)
+	if not node or node[".type"] ~= "nodes" or not meta then return {ok=false, error="托管节点不存在"} end
+	if front_id ~= "" then
+		local front = c:get_all(PW, front_id)
+		local front_meta = metadata_for_node(c, front_id)
+		if not front or front[".type"] ~= "nodes" or not front_meta then
+			return {ok=false, error="前置节点不存在或不属于本插件管理"}
+		end
+		if front_id == node_id then return {ok=false, error="不能把节点自身设为前置代理"} end
+		if would_loop(c, node_id, front_id) then
+			return {ok=false, error="存在循环依赖：从该前置节点沿链最终会回到本节点"}
+		end
+	end
+	apply_front(c, node_id, front_id)
+	c:commit(PW); c:commit(CFG)
+	local rc = sys.call("/etc/init.d/passwall restart >/tmp/pwc-front.log 2>&1")
+	if rc ~= 0 then return {ok=false, error="配置已写入，但 PassWall 重载失败", details=trim(read_file("/tmp/pwc-front.log") or "")} end
+	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1 || true")
+	sys.call("logger -t passwall-device " .. shellquote("前置代理已设置 node=" .. node_id .. " front=" .. (front_id == "" and "none" or front_id)))
+	return {ok=true, node_id=node_id, front=front_id, message=front_id == "" and "已清除前置代理（直连）" or "前置代理已设置"}
+end
+
+local function set_front_many(id_text, front_id)
+	local ids = parse_ids(id_text)
+	if not ids or #ids == 0 then return {ok=false, error="请选择有效的节点"} end
+	front_id = trim(front_id or "")
+	if front_id ~= "" and not valid_id(front_id) then return {ok=false, error="前置节点标识无效"} end
+	local selected = {}
+	for _, id in ipairs(ids) do selected[id] = true end
+	local c = uci.cursor()
+	for _, id in ipairs(ids) do
+		local node = c:get_all(PW, id)
+		local meta = metadata_for_node(c, id)
+		if not node or node[".type"] ~= "nodes" or not meta then
+			return {ok=false, error="托管节点不存在：" .. id}
+		end
+	end
+	if front_id ~= "" then
+		if selected[front_id] then return {ok=false, error="前置节点不能同时是被设置的节点"} end
+		local front = c:get_all(PW, front_id)
+		local front_meta = metadata_for_node(c, front_id)
+		if not front or front[".type"] ~= "nodes" or not front_meta then
+			return {ok=false, error="前置节点不存在或不属于本插件管理"}
+		end
+		for _, id in ipairs(ids) do
+			if would_loop(c, id, front_id) then
+				return {ok=false, error="存在循环依赖：" .. id .. " → " .. front_id}
+			end
+		end
+	end
+	for _, id in ipairs(ids) do apply_front(c, id, front_id) end
+	c:commit(PW); c:commit(CFG)
+	local rc = sys.call("/etc/init.d/passwall restart >/tmp/pwc-front.log 2>&1")
+	if rc ~= 0 then return {ok=false, error="配置已写入，但 PassWall 重载失败", details=trim(read_file("/tmp/pwc-front.log") or "")} end
+	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1 || true")
+	sys.call("logger -t passwall-device " .. shellquote("前置代理批量设置 nodes=" .. table.concat(ids, ",") .. " front=" .. (front_id == "" and "none" or front_id)))
+	return {ok=true, nodes=#ids, front=front_id, message=front_id == "" and "已清除所选节点的前置代理（直连）" or "已为 " .. #ids .. " 个节点设置前置代理"}
+end
+
 -- 一键恢复初始配置：清空全部节点、口令、设备绑定与相关规则，
 -- 停用认证服务，并把 PassWall 恢复到安装前快照状态。
 local function reset_all()
@@ -1100,9 +1198,16 @@ local function test_node(node_id)
 	return record_node_test(node_id, {ok=false,reachable=false,error="代理测试失败，节点将保持断网",details=details})
 end
 
+-- 更新源按可达性排序：GitHub raw 直连在国内网络常被掐断，
+-- 优先走社区加速镜像（内容与 raw 一致，安装包仍校验 SHA-256），
+-- 最后回退到自建 VPS。rewrite 前缀用于把清单里的 raw.githubusercontent.com
+-- ipk 链接重写到当前镜像，保证能实际下载到包。
 local UPDATE_MANIFESTS = {
-	"https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/update.json",
-	"http://m.yaml.uk:25532/update.json"
+	{ url="https://ghfast.top/https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/update.json", rewrite="https://ghfast.top/" },
+	{ url="https://ghproxy.net/https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/update.json", rewrite="https://ghproxy.net/" },
+	{ url="https://gh-proxy.com/https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/update.json", rewrite="https://gh-proxy.com/" },
+	{ url="https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/update.json", rewrite=nil },
+	{ url="http://m.yaml.uk:25532/update-vps.json", rewrite=nil }
 }
 
 local function version_parts(version)
@@ -1151,14 +1256,15 @@ end
 
 local function fetch_update_manifest()
 	local path = "/tmp/passwall-device-update-" .. tostring(nixio.getpid()) .. ".json"
-	for _, url in ipairs(UPDATE_MANIFESTS) do
+	for _, entry in ipairs(UPDATE_MANIFESTS) do
 		os.remove(path)
-		local rc = sys.call("curl -4 -fsSL --connect-timeout 5 --max-time 12 " .. shellquote(url) .. " -o " .. shellquote(path) .. " 2>/dev/null")
+		local rc = sys.call("curl -4 -fsSL --connect-timeout 5 --max-time 12 " .. shellquote(entry.url) .. " -o " .. shellquote(path) .. " 2>/dev/null")
 		if rc == 0 then
 			local manifest = parse_manifest(jsonc.parse(read_file(path) or ""))
 			os.remove(path)
 			if manifest then
-				manifest.source = url
+				manifest.source = entry.url
+				manifest.rewrite = entry.rewrite
 				return manifest
 			end
 		else
@@ -1181,9 +1287,13 @@ local function check_update()
 end
 
 -- 下载、校验 SHA-256 并 opkg 安装指定包；成功返回 nil，失败返回错误信息与详情
-local function install_package(ipk_url, expected_sha256, log_path, extra_flags)
+local function install_package(ipk_url, expected_sha256, log_path, extra_flags, rewrite)
 	local ipk = "/tmp/passwall-device-update-" .. tostring(nixio.getpid()) .. ".ipk"
 	os.remove(ipk)
+	-- 镜像源返回的清单里 ipk 仍是 raw.githubusercontent.com 直链，需重写到当前镜像
+	if rewrite and ipk_url:match("^https://raw%.githubusercontent%.com/") then
+		ipk_url = rewrite .. ipk_url
+	end
 	local rc = sys.call("curl -4 -fsSL --connect-timeout 8 --max-time 120 " .. shellquote(ipk_url) .. " -o " .. shellquote(ipk) .. " 2>" .. shellquote(log_path))
 	if rc ~= 0 then os.remove(ipk); return "更新包下载失败", trim(read_file(log_path) or "") end
 	local actual = trim(sys.exec("sha256sum " .. shellquote(ipk) .. " 2>/dev/null | cut -d' ' -f1") or ""):lower()
@@ -1204,7 +1314,7 @@ local function install_update()
 	if not version_newer(manifest.version, current) then
 		return {ok=false, current=current, latest=manifest.version, error="当前已经是最新版本"}
 	end
-	local install_error, details = install_package(manifest.ipk_url, manifest.sha256, "/tmp/passwall-device-update.log")
+	local install_error, details = install_package(manifest.ipk_url, manifest.sha256, "/tmp/passwall-device-update.log", nil, manifest.rewrite)
 	if install_error then
 		return {ok=false, current=current, latest=manifest.version, error=install_error, details=details}
 	end
@@ -1226,7 +1336,7 @@ local function rollback(version)
 	if not target then
 		return {ok=false, current=current, latest=manifest.version, error="更新清单中没有版本 " .. version .. " 的回退包"}
 	end
-	local install_error, details = install_package(target.ipk_url, target.sha256, "/tmp/passwall-device-rollback.log", "--force-downgrade")
+	local install_error, details = install_package(target.ipk_url, target.sha256, "/tmp/passwall-device-rollback.log", "--force-downgrade", manifest.rewrite)
 	if install_error then
 		return {ok=false, current=current, version=version, error=install_error, details=details}
 	end
@@ -1244,6 +1354,8 @@ elseif action=="delete-node" then reply(delete_nodes(arg[2] or "",arg[3] or ""))
 elseif action=="delete-nodes" then reply(delete_nodes(arg[2] or "",arg[3] or ""))
 elseif action=="unbind" then reply(unbind_many(arg[2] or ""))
 elseif action=="unbind-many" then reply(unbind_many(arg[2] or ""))
+elseif action=="set-front" then reply(set_front(arg[2] or "", arg[3] or ""))
+elseif action=="set-front-many" then reply(set_front_many(arg[2] or "", arg[3] or ""))
 elseif action=="test-node" then reply(test_node(arg[2] or ""))
 elseif action=="update-node" then reply(update_node(arg[2] or "",arg[3] or ""))
 elseif action=="update-code" then reply(update_code(arg[2] or "",arg[3] or ""))
