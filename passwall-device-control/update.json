@@ -1,9 +1,9 @@
 {
-  "version": "0.8.1",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.1_all.ipk",
-  "sha256": "00ae24ac65e703363a20564f29fb63645759095e26e1a6cc70743f7bb2266c48",
+  "version": "0.8.2",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.2_all.ipk",
+  "sha256": "f58634fc5a5ecb1ea96b83b249029f6a754b90a8d66991320eadd5dee8a908dc",
   "published_at": "2026-10-17",
-  "notes": "前置代理选择器支持按节点名称实时搜索过滤，输入时自动选中第一个匹配项，回车即可确认。",
+  "notes": "新增：主页默认显示国内网络连通性检测（路由器直连百度判断国内网是否正常）；一键添加直连按钮（自动生成 3 个直连口令，编号从当前口令序号继续往后排，输入后设备直接联网不走代理）；直连口令仅放行设备，不创建代理规则。",
   "history": [
     {
       "version": "0.6.0",
@@ -52,6 +52,12 @@
       "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.0_all.ipk",
       "sha256": "f939f016348c8f4c5db9760595bec0384775e85ffbf91e669be56cd10a1e8311",
       "notes": "新增前置代理：单个/批量设置节点 chain_proxy+preproxy_node，支持清除直连与循环校验；界面拆分主页/日志两个标签页；口令位数固定 3 位，移除设置项。"
+    },
+    {
+      "version": "0.8.1",
+      "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.1_all.ipk",
+      "sha256": "00ae24ac65e703363a20564f29fb63645759095e26e1a6cc70743f7bb2266c48",
+      "notes": "前置代理选择器支持按节点名称实时搜索过滤，输入时自动选中第一个匹配项，回车即可确认。"
     }
   ]
 }
