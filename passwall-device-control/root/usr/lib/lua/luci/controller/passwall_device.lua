@@ -37,6 +37,7 @@ local function run(action, args)
 end
 
 function index()
+	-- 不使用模块顶层 local（LuCI 字节码缓存还原后 upvalue 会丢失）
 	local cfg = io.open("/etc/config/passwall_device", "r")
 	if not cfg then return end
 	cfg:close()
@@ -45,6 +46,8 @@ function index()
 	page.dependent = true
 	page.acl_depends = { "luci-app-passwall-device" }
 
+	-- 单级子入口，避免 iStoreOS LuCI 对多级 api/* 路径触发
+	-- "Access Violation: has no parent node"（中间节点 auto=true 与父页面 dependent=true 冲突）
 	entry({"admin", "services", "passwall_device", "status"}, call("api_status")).leaf = true
 	entry({"admin", "services", "passwall_device", "import"}, call("api_import")).leaf = true
 	entry({"admin", "services", "passwall_device", "toggle"}, call("api_toggle")).leaf = true
@@ -53,6 +56,8 @@ function index()
 	entry({"admin", "services", "passwall_device", "unbind"}, call("api_unbind")).leaf = true
 	entry({"admin", "services", "passwall_device", "unbind-many"}, call("api_unbind_many")).leaf = true
 	entry({"admin", "services", "passwall_device", "test"}, call("api_test")).leaf = true
+	entry({"admin", "services", "passwall_device", "test-china"}, call("api_test_china")).leaf = true
+	entry({"admin", "services", "passwall_device", "add-direct-codes"}, call("api_add_direct_codes")).leaf = true
 	entry({"admin", "services", "passwall_device", "edit"}, call("api_edit")).leaf = true
 	entry({"admin", "services", "passwall_device", "edit-code"}, call("api_edit_code")).leaf = true
 	entry({"admin", "services", "passwall_device", "add-codes"}, call("api_add_codes")).leaf = true
@@ -110,6 +115,8 @@ function api_unbind_many()
 	json(run("unbind-many", {ids}))
 end
 function api_test() json(run("test-node", {http.formvalue("node_id") or ""})) end
+function api_test_china() json(run("test-china")) end
+function api_add_direct_codes() json(run("add-direct-codes")) end
 function api_edit() json(run("update-node", {http.formvalue("node_id") or "", http.formvalue("remarks") or "", http.formvalue("code") or ""})) end
 function api_edit_code() json(run("update-code", {http.formvalue("code_id") or "", http.formvalue("value") or ""})) end
 function api_add_codes() json(run("add-codes", {http.formvalue("node_ids") or "", http.formvalue("count") or "1"})) end
