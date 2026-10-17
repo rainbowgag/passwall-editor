@@ -1,9 +1,9 @@
 {
-  "version": "0.8.2",
-  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.2_all.ipk",
-  "sha256": "f58634fc5a5ecb1ea96b83b249029f6a754b90a8d66991320eadd5dee8a908dc",
+  "version": "0.8.3",
+  "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.3_all.ipk",
+  "sha256": "6ec1d8116f7f3673d5eb6b9c0ee986978999a5d1a0476bd8cff435d1700f7580",
   "published_at": "2026-10-17",
-  "notes": "新增：主页默认显示国内网络连通性检测（路由器直连百度判断国内网是否正常）；一键添加直连按钮（自动生成 3 个直连口令，编号从当前口令序号继续往后排，输入后设备直接联网不走代理）；直连口令仅放行设备，不创建代理规则。",
+  "notes": "修复：绑定设备走代理的兼容性（PassWall r336 需命名 ACL section + node 字段 + mode=1），解决手机输入口令后仍走直连的 bug",
   "history": [
     {
       "version": "0.6.0",
@@ -58,6 +58,12 @@
       "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.1_all.ipk",
       "sha256": "00ae24ac65e703363a20564f29fb63645759095e26e1a6cc70743f7bb2266c48",
       "notes": "前置代理选择器支持按节点名称实时搜索过滤，输入时自动选中第一个匹配项，回车即可确认。"
+    },
+    {
+      "version": "0.8.2",
+      "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.2_all.ipk",
+      "sha256": "f58634fc5a5ecb1ea96b83b249029f6a754b90a8d66991320eadd5dee8a908dc",
+      "notes": "新增：主页默认显示国内网络连通性检测（路由器直连百度判断国内网是否正常）；一键添加直连按钮（自动生成 3 个直连口令，编号从当前口令序号继续往后排，输入后设备直接联网不走代理）；直连口令仅放行设备，不创建代理规则。"
     }
   ]
 }
