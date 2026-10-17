@@ -653,8 +653,7 @@ local function migrate_codes(c)
 		if not valid_id(code_id or "") or not c:get(CFG, code_id, "value") or used[code_id] then code_id = nil end
 		if not code_id then
 			for _, code in ipairs(codes_for_node(c, binding.node_id)) do
-				if not used[code[".name"]] then c
-ode_id = code[".name"]; break end
+				if not used[code[".name"]] then code_id = code[".name"]; break end
 			end
 			if not code_id then
 				local prefix = c:get(CFG, "global", "code_prefix") or ""
