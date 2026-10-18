@@ -842,7 +842,7 @@ local function bind(ip, code)
 		sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
 		sys.call("/usr/share/passwall-device/firewall.sh reload >/dev/null 2>&1 || true")
 		sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1 || true")
-		kick_wifi_client(mac_d)
+		-- 同代理分支：不踢设备重连，避免认证页循环
 		local _,_,rate_path_d=rate_state(ip,false); os.remove(rate_path_d)
 		sys.call("logger -t passwall-device "..shellquote("直连绑定成功 mac="..mac_d.." code="..code))
 		return {ok=true, message="绑定成功（直连）", node="直连", code=code, kicked=old_code_d and old_code_d.mac or nil}
@@ -861,7 +861,7 @@ local function bind(ip, code)
 	if old_code and (not old_mac or old_code[".name"] ~= old_mac[".name"]) then remove_binding(c, old_code) end
 	local bid = new_section(c, CFG, "binding", "pwc_bind_", {
 		mac=mac, ip=ip, hostname=hostname, node_id=meta.passwall_id, code_id=code_meta[".name"], code=code, acl_id="",
-		state="pending", wireless="1", bound_at=os.date("%Y-%m-%d %H:%M:%S")
+		state="active", wireless="1", bound_at=os.date("%Y-%m-%d %H:%M:%S")
 	})
 	local acl = add_named_acl(c, "pwc_acl_" .. bid)
 	c:set(PW, acl, "enabled", "1")
@@ -903,13 +903,14 @@ local function bind(ip, code)
 	-- 异步应用 PassWall：全量 restart 实测约 13 秒，同步等待会让手机端
 	-- "正在配置网络"卡十几秒。改为后台执行、立即返回绑定成功，代理规则
 	-- 约 10 秒后生效（生效前设备短暂直连，不影响国内网络）。
+	-- 注意：不能踢设备重连。实测（0.8.5）踢掉手机后，手机在 PassWall 异步重启
+	-- 完成前（约10秒）重连并重新做连通性检测；即使放行名单已含该 MAC，
+	-- iOS 仍会把检测失败解释为"需要认证"再次弹出认证页 → 用户再次输入 →
+	-- 再次绑定 → 再次踢设备，形成死循环（同一设备 1 分钟内绑定 3 次）。
+	-- 保持设备不断线：state=active 已先于 firewall reload 提交，放行立即生效，
+	-- 设备保持连接，约 10 秒后代理生效；iOS 的"无互联网"提示会在周期性重测时自动消失。
 	sys.call("(sleep 1; /etc/init.d/passwall restart >/tmp/pwc-passwall-apply.log 2>&1) >/dev/null 2>&1 &")
-	local active = uci.cursor()
-	active:set(CFG, bid, "state", "active")
-	active:commit(CFG)
 	sys.call("/etc/init.d/passwall-device reload >/dev/null 2>&1")
-	-- 绑定成功后踢设备重连：让手机重新完成连通性检测，避免"热点无互联网"提示
-	kick_wifi_client(mac)
 	local _,_,rate_path=rate_state(ip,false); os.remove(rate_path)
 	sys.call("logger -t passwall-device "..shellquote("绑定成功 mac="..mac.." node="..(nodes[meta.passwall_id].remarks or meta.passwall_id).."（后台生效）"))
 	return {ok=true, message="绑定成功，代理配置正在后台生效（约10秒）", node=nodes[meta.passwall_id].remarks or meta.passwall_id, code=code, async=true, kicked=old_code and old_code.mac or nil}
