@@ -1,9 +1,9 @@
 {
-  "version": "0.8.6",
-  "ipk_url": "https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.8.6_all.ipk",
-  "sha256": "4fc2625893cf2829baad46c012da9eb49554d050b365acbcb84ec876328aff63",
-  "published_at": "2026-10-18",
-  "notes": "修复：手机输入口令后反复重连并反复弹出认证页的死循环。根因：绑定先以 pending 状态创建导致放行名单未含该设备，随后踢设备重连，手机在 PassWall 异步重启完成前重连并重新检测连通性，被再次判定为需认证。修复：绑定直接置为 active 后再刷新放行名单，并取消绑定后踢设备，设备保持连接约10秒后代理生效。",
+  "version": "0.8.7",
+  "ipk_url": "https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.8.7_all.ipk",
+  "sha256": "70addb0fa600b9ba01a4e6acaf53d9e5dfce7fb2fb3216b020161aa52a3e0811",
+  "published_at": "2026-10-22",
+  "notes": "修复：在线升级包地址与清单不匹配导致升级失败；门户 bind.lan 在 /etc/hosts 重复累积；portal-setup 误删用户 dnsmasq address 列表；onekey 无法识别固件内置版本；直连节点误入批量检测/前置代理；DHCP IP 冲突被忽略；更新源增加下载失败自动切换。",
   "history": [
     {
       "version": "0.6.0",
@@ -73,15 +73,21 @@
     },
     {
       "version": "0.8.4",
-      "ipk_url": "https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.8.4_all.ipk",
+      "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.4_all.ipk",
       "sha256": "c16b6f5c7272a292d9bb056c989cec182a950f746275128cd7fa767507cf682a",
       "notes": "修复：Kwrt 固件 c:add 命名失效导致 ACL 匿名、代理规则不生成（手机绑定仍直连）；绑定改为后台生效立即返回；绑定后自动踢设备重连解决首次连接提示无互联网。"
     },
     {
       "version": "0.8.5",
-      "ipk_url": "https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/dist/luci-app-passwall-device_0.8.5_all.ipk",
+      "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.5_all.ipk",
       "sha256": "68e6bd19ab48afc9a319231e6f69331dc045b6ec73ba1d4fe6c0d44f559fe771",
       "notes": "修复：设置前置代理后页面无反应（PassWall 重启改后台异步生效，立即返回成功并自动刷新页面）；节点列表中的前置代理以亮蓝色加粗高亮显示，与其他文字区分。"
+    },
+    {
+      "version": "0.8.6",
+      "ipk_url": "http://m.yaml.uk:25532/luci-app-passwall-device_0.8.6_all.ipk",
+      "sha256": "4fc2625893cf2829baad46c012da9eb49554d050b365acbcb84ec876328aff63",
+      "notes": "修复：手机输入口令后反复重连并反复弹出认证页的死循环。根因：绑定先以 pending 状态创建导致放行名单未含该设备，随后踢设备重连，手机在 PassWall 异步重启完成前重连并重新检测连通性，被再次判定为需认证。修复：绑定直接置为 active 后再刷新放行名单，并取消绑定后踢设备，设备保持连接约10秒后代理生效。"
     }
   ]
 }

@@ -31,6 +31,8 @@ uci -q get passwall_device.global.previous_acl_enable >/dev/null || uci set pass
 uci commit passwall_device
 /usr/share/passwall-device/app.lua migrate >/tmp/pwc-migrate.log 2>&1 || true
 /etc/init.d/passwall-device enable
+/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+[ "$(uci -q get passwall_device.global.enabled)" != "1" ] || /etc/init.d/passwall-device restart >/dev/null 2>&1 || true
 rm -rf /tmp/luci-indexcache /tmp/luci-modulecache /tmp/luci-*
 /etc/init.d/rpcd restart >/dev/null 2>&1 || true
 /etc/init.d/nginx reload >/dev/null 2>&1 || true

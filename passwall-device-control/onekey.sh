@@ -13,7 +13,7 @@ if [ -n "${PW_UPDATE_URLS:-}" ]; then
 	UPDATE_SOURCES="$PW_UPDATE_URLS"
 else
 	UPDATE_SOURCES="https://raw.githubusercontent.com/rainbowgag/passwall-editor/main/passwall-device-control/update.json
-http://m.yaml.uk:25532/update.json"
+http://m.yaml.uk:25532/update-vps.json"
 fi
 
 say() { printf '%s\n' "$*"; }
@@ -35,7 +35,10 @@ jget() {
 }
 
 installed_version() {
-	opkg list-installed 2>/dev/null | awk '/^luci-app-passwall-device /{print $3}'
+	local v="$(opkg list-installed 2>/dev/null | awk '/^luci-app-passwall-device /{print $3; exit}')"
+	# 固件内置安装时不会出现在 opkg 清单里，改为读插件 VERSION 文件兜底。
+	[ -n "$v" ] || v="$(tr -d '\r\n' < /usr/share/passwall-device/VERSION 2>/dev/null || true)"
+	printf '%s\n' "$v"
 }
 
 # 版本比较：$1 >= $2（x.y.z 三段数字）

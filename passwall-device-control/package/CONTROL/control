@@ -1,5 +1,5 @@
 Package: luci-app-passwall-device
-Version: 0.8.6
+Version: 0.8.7
 Architecture: all
 Maintainer: local
 Depends: luci-compat, luci-lua-runtime, luci-app-passwall, curl, xray-core, sing-box

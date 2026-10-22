@@ -829,6 +829,10 @@ local function bind(ip, code)
 		if not mac_d then return {ok=false, error="无法识别当前设备，请关闭随机 MAC 后重试"} end
 		mac_d = mac_d:lower()
 		local hostname_d = hostname_for(c, mac_d, ip)
+		local _, _, dhcp_err_d = ensure_dhcp(c, mac_d, ip, hostname_d)
+		if dhcp_err_d == "ip_conflict" then
+			return {ok=false, error="当前 IP 已被其他静态租约占用，请先调整 DHCP 静态租约后重试"}
+		end
 		local old_mac_d = binding_for_mac(c, mac_d)
 		local old_code_d = binding_for_code(c, code_meta[".name"])
 		if old_mac_d then remove_binding(c, old_mac_d) end
@@ -855,6 +859,10 @@ local function bind(ip, code)
 	if not mac then return {ok=false, error="无法识别当前设备，请关闭随机 MAC 后重试"} end
 	mac = mac:lower()
 	local hostname = hostname_for(c, mac, ip)
+	local _, _, dhcp_err = ensure_dhcp(c, mac, ip, hostname)
+	if dhcp_err == "ip_conflict" then
+		return {ok=false, error="当前 IP 已被其他静态租约占用，请先调整 DHCP 静态租约后重试"}
+	end
 	local old_mac = binding_for_mac(c, mac)
 	local old_code = binding_for_code(c, code_meta[".name"])
 	if old_mac then remove_binding(c, old_mac) end
@@ -1366,8 +1374,9 @@ local function parse_manifest(manifest)
 	}
 end
 
-local function fetch_update_manifest()
+local function fetch_update_manifests()
 	local path = "/tmp/passwall-device-update-" .. tostring(nixio.getpid()) .. ".json"
+	local manifests, seen = {}, {}
 	for _, entry in ipairs(UPDATE_MANIFESTS) do
 		os.remove(path)
 		local rc = sys.call("curl -4 -fsSL --connect-timeout 5 --max-time 12 " .. shellquote(entry.url) .. " -o " .. shellquote(path) .. " 2>/dev/null")
@@ -1375,21 +1384,26 @@ local function fetch_update_manifest()
 			local manifest = parse_manifest(jsonc.parse(read_file(path) or ""))
 			os.remove(path)
 			if manifest then
-				manifest.source = entry.url
-				manifest.rewrite = entry.rewrite
-				return manifest
+				local key = manifest.version .. "|" .. manifest.ipk_url .. "|" .. manifest.sha256
+				if not seen[key] then
+					seen[key] = true
+					manifest.source = entry.url
+					manifest.rewrite = entry.rewrite
+					manifests[#manifests + 1] = manifest
+				end
 			end
 		else
 			os.remove(path)
 		end
 	end
-	return nil, "无法获取更新信息，请检查路由器网络或稍后重试"
+	return manifests
 end
 
 local function check_update()
 	local current = trim(read_file("/usr/share/passwall-device/VERSION") or "0.0.0")
-	local manifest, err = fetch_update_manifest()
-	if not manifest then return {ok=false, current=current, error=err} end
+	local manifests = fetch_update_manifests()
+	if #manifests == 0 then return {ok=false, current=current, error="无法获取更新信息，请检查路由器网络或稍后重试"} end
+	local manifest = manifests[1]
 	return {
 		ok=true, current=current, latest=manifest.version,
 		available=version_newer(manifest.version, current),
@@ -1421,17 +1435,23 @@ end
 
 local function install_update()
 	local current = trim(read_file("/usr/share/passwall-device/VERSION") or "0.0.0")
-	local manifest, err = fetch_update_manifest()
-	if not manifest then return {ok=false, current=current, error=err} end
-	if not version_newer(manifest.version, current) then
-		return {ok=false, current=current, latest=manifest.version, error="当前已经是最新版本"}
+	local manifests = fetch_update_manifests()
+	if #manifests == 0 then return {ok=false, current=current, error="无法获取更新信息，请检查路由器网络或稍后重试"} end
+	local last_error, last_details
+	for _, manifest in ipairs(manifests) do
+		if version_newer(manifest.version, current) then
+			local install_error, details = install_package(manifest.ipk_url, manifest.sha256, "/tmp/passwall-device-update.log", nil, manifest.rewrite)
+			if not install_error then
+				local installed = trim(read_file("/usr/share/passwall-device/VERSION") or current)
+				return {ok=true, previous=current, version=installed, message="更新完成，页面即将刷新"}
+			end
+			last_error = install_error
+			last_details = details
+		else
+			last_error = last_error or "当前已经是最新版本"
+		end
 	end
-	local install_error, details = install_package(manifest.ipk_url, manifest.sha256, "/tmp/passwall-device-update.log", nil, manifest.rewrite)
-	if install_error then
-		return {ok=false, current=current, latest=manifest.version, error=install_error, details=details}
-	end
-	local installed = trim(read_file("/usr/share/passwall-device/VERSION") or current)
-	return {ok=true, previous=current, version=installed, message="更新完成，页面即将刷新"}
+	return {ok=false, current=current, latest=manifests[1].version, error=last_error or "更新失败", details=last_details or ""}
 end
 
 local function rollback(version)
@@ -1439,21 +1459,29 @@ local function rollback(version)
 	local current = trim(read_file("/usr/share/passwall-device/VERSION") or "0.0.0")
 	if version == "" then return {ok=false, current=current, error="请选择要回退的版本"} end
 	if version == current then return {ok=false, current=current, error="该版本就是当前版本，无需回退"} end
-	local manifest, err = fetch_update_manifest()
-	if not manifest then return {ok=false, current=current, error=err} end
-	local target
-	for _, item in ipairs(manifest.history or {}) do
-		if item.version == version then target = item; break end
+	local manifests = fetch_update_manifests()
+	if #manifests == 0 then return {ok=false, current=current, error="无法获取更新信息，请检查路由器网络或稍后重试"} end
+	local found_target, last_error, last_details
+	for _, manifest in ipairs(manifests) do
+		local target
+		for _, item in ipairs(manifest.history or {}) do
+			if item.version == version then target = item; break end
+		end
+		if target then
+			found_target = true
+			local install_error, details = install_package(target.ipk_url, target.sha256, "/tmp/passwall-device-rollback.log", "--force-downgrade", manifest.rewrite)
+			if not install_error then
+				local installed = trim(read_file("/usr/share/passwall-device/VERSION") or current)
+				return {ok=true, previous=current, version=installed, message="已回退到 " .. installed .. "，页面即将刷新"}
+			end
+			last_error = install_error
+			last_details = details
+		end
 	end
-	if not target then
-		return {ok=false, current=current, latest=manifest.version, error="更新清单中没有版本 " .. version .. " 的回退包"}
+	if not found_target then
+		return {ok=false, current=current, latest=manifests[1].version, error="更新清单中没有版本 " .. version .. " 的回退包"}
 	end
-	local install_error, details = install_package(target.ipk_url, target.sha256, "/tmp/passwall-device-rollback.log", "--force-downgrade", manifest.rewrite)
-	if install_error then
-		return {ok=false, current=current, version=version, error=install_error, details=details}
-	end
-	local installed = trim(read_file("/usr/share/passwall-device/VERSION") or current)
-	return {ok=true, previous=current, version=installed, message="已回退到 " .. installed .. "，页面即将刷新"}
+	return {ok=false, current=current, version=version, error=last_error or "回退失败", details=last_details or ""}
 end
 
 local action=arg[1] or "status"

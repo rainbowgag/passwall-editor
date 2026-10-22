@@ -25,17 +25,15 @@ write_captive_files() {
 }
 
 reg_dnsmasq() {
-	# 通过 UCI address 列表注册，避免依赖 confdir
+	# 通过 UCI address 列表注册，避免依赖 confdir。
+	# 只清理本插件管理的 /$host/... 条目，避免误删用户配置的其他 address 条目。
 	for host in $ADDR_HOSTS; do
-		uci -q delete "dhcp.@dnsmasq[0].address" >/dev/null 2>&1 || true
-		break
-	done
-	for host in $ADDR_HOSTS; do
-		already=""
 		for addr in $(uci -q get "dhcp.@dnsmasq[0].address" 2>/dev/null || true); do
-			[ "$addr" = "/$host/$LAN_IP" ] && already=1 && break
+			case "$addr" in
+				"/$host/"*) uci -q del_list "dhcp.@dnsmasq[0].address=$addr" >/dev/null 2>&1 || true ;;
+			esac
 		done
-		[ -z "$already" ] && uci -q add_list "dhcp.@dnsmasq[0].address=/$host/$LAN_IP" 2>/dev/null || true
+		uci -q add_list "dhcp.@dnsmasq[0].address=/$host/$LAN_IP" >/dev/null 2>&1 || true
 	done
 	uci -q commit dhcp || true
 	# 主 dnsmasq 明确加载 /tmp/dnsmasq.d（conf-dir），双保险确保锚定生效
@@ -50,12 +48,12 @@ reg_dnsmasq() {
 
 reg_hosts() {
 	# 部分 iStoreOS 定制 dnsmasq 不读 /etc/hosts 之外的锚定，写 /etc/hosts 双保险
-	if ! grep -q "$HOSTS_MARKER" /etc/hosts 2>/dev/null; then
-		printf '\n%s\n' "$HOSTS_MARKER" >> /etc/hosts
-	fi
-	sed -i "/$HOSTS_MARKER/d" /etc/hosts
-	printf '%s\n' "$HOSTS_MARKER" >> /etc/hosts
-	printf '%s %s\n' "$LAN_IP" "$ADDR_HOSTS" >> /etc/hosts
+	sed -i "/$HOSTS_MARKER/d" /etc/hosts 2>/dev/null || true
+	for host in $ADDR_HOSTS; do
+		# 删除任何旧 IP 的 bind.lan 记录，避免重复累积或在 LAN 地址变更后残留错误解析。
+		sed -i "/ $host[[:space:]]*$/d" /etc/hosts 2>/dev/null || true
+		printf '%s %s %s\n' "$LAN_IP" "$host" "$HOSTS_MARKER" >> /etc/hosts
+	done
 }
 
 setup() {
@@ -82,8 +80,7 @@ EOF
 stop() {
 	rm -f "$CONF"
 	rm -f "$TMP_DNS"
-	sed -i "/$HOSTS_MARKER/d" /etc/hosts
-	sed -i "/^$LAN_IP bind\.lan /d" /etc/hosts
+	sed -i "/$HOSTS_MARKER/d; / bind\.lan[[:space:]]*$/d" /etc/hosts 2>/dev/null || true
 	rm -rf "$WWW_DIR"
 	for path in generate_204 gen_204 hotspot-detect.html connecttest.txt ncsi.txt redirect success.txt; do
 		rm -f "/www/$path"
